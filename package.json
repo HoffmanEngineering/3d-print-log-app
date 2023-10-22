@@ -6,7 +6,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "release:android": "cordova build android --release"
+    "build:android": "cordova build android",
+    "release:android": "cordova run android --prod --release -- --keystore=../AndroidKeyStore/KeyStore.jks --storePassword=***REMOVED*** --alias=ChrisUpload --password=***REMOVED*** --packageType=bundle"
   },
   "keywords": [
     "ecosystem:cordova"
