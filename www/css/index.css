@@ -29,8 +29,13 @@ body {
   -webkit-touch-callout: none; /* prevent callout to copy image, etc when tap to hold */
   -webkit-text-size-adjust: none; /* prevent webkit from resizing text to fit */
   -webkit-user-select: none; /* prevent copy paste, to allow, change 'none' to 'text' */
-  background-color: #e4e4e4;
-  background-image: linear-gradient(to bottom, #a7a7a7 0%, #e4e4e4 51%);
+  background-color: #3F50B5; 
+  /* background-image: linear-gradient(to bottom, #a7a7a7 0%, #e4e4e4 51%); */
+  /* background: url(../img/Logo2_cropped_scaled__1024x500.jpg) no-repeat center center; */
+  background-image:    url(../img/Logo2_cropped_scaled__1024x500.jpg);
+  background-size:     contain;                      /* <------ */
+  background-repeat:   no-repeat;
+  background-position: center center;              /* optional, center the image */
   font-family: system-ui, -apple-system, -apple-system-font, "Segoe UI", "Roboto", sans-serif;
   font-size: 12px;
   height: 100vh;
@@ -45,7 +50,7 @@ body {
 
 /* Portrait layout (default) */
 .app {
-  background: url(../img/logo.png) no-repeat center top; /* 170px x 200px */
+  background: url(../img/Logo2_cropped_scaled__1024x500.jpg) no-repeat center top; /* 170px x 200px */
   position: absolute; /* position in the center of the screen */
   left: 50%;
   top: 50%;
@@ -118,8 +123,8 @@ h1 {
   -webkit-animation: fade 3000ms infinite;
 }
 
-@media screen and (prefers-color-scheme: dark) {
+/* @media screen and (prefers-color-scheme: dark) {
   body {
     background-image: linear-gradient(to bottom, #585858 0%, #1b1b1b 51%);
   }
-}
+} */
