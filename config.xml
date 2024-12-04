@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="com.printlog.app" version="1.1.1" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+<widget id="com.printlog.app" version="1.1.2" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
     <name>3D Print Log</name>
     <description>
         Easily log and track your 3D prints. Record print times, filament usage, settings and more. Quickly search for past 3D prints.
@@ -13,8 +13,8 @@
     <allow-navigation href="https://www.3dprintlog.com/*" />
     <allow-navigation href="https://*.auth0.com/*" />
     <allow-navigation href="https://*.google.com/*" />
-    <allow-intent href="http://*/*" />
-    <allow-intent href="https://*/*" />
+    <!-- <allow-intent href="http://*/*" />
+    <allow-intent href="https://*/*" /> -->
     <platform name="android">
         <allow-intent href="market:*" />
         <preference name="AndroidXEnabled" value="true" />

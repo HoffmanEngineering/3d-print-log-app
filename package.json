@@ -15,7 +15,8 @@
   "author": "Apache Cordova Team",
   "license": "Apache-2.0",
   "devDependencies": {
-    "cordova-android": "^12.0.1",
+    "cordova-android": "^13.0.0",
+    "cordova-plugin-customurlscheme": "^5.0.2",
     "cordova-plugin-dialogs": "^2.0.2",
     "cordova-plugin-network-information": "^3.0.0",
     "cordova-plugin-splashscreen": "^6.0.2",
@@ -26,7 +27,11 @@
       "cordova-plugin-dialogs": {},
       "cordova-plugin-network-information": {},
       "cordova-plugin-statusbar": {},
-      "cordova-plugin-splashscreen": {}
+      "cordova-plugin-splashscreen": {},
+      "cordova-plugin-customurlscheme": {
+        "URL_SCHEME": "com.printlog.app",
+        "ANDROID_PATHPREFIX": "/cordova/com.printlog.app/callback"
+      }
     },
     "platforms": [
       "android"
