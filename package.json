@@ -7,7 +7,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build:android": "cordova build android",
-    "release:android": "cordova run android --prod --release -- --keystore=../AndroidKeyStore/KeyStore.jks --storePassword=***REMOVED*** --alias=ChrisUpload --password=***REMOVED*** --packageType=bundle"
+    "release:android": "cordova build android --prod --release -- --keystore=../AndroidKeyStore/KeyStore.jks --storePassword=***REMOVED*** --alias=ChrisUpload --password=***REMOVED*** --packageType=bundle"
   },
   "keywords": [
     "ecosystem:cordova"
@@ -15,7 +15,7 @@
   "author": "Apache Cordova Team",
   "license": "Apache-2.0",
   "devDependencies": {
-    "cordova-android": "^13.0.0",
+    "cordova-android": "^14.0.1",
     "cordova-plugin-customurlscheme": "^5.0.2",
     "cordova-plugin-dialogs": "^2.0.2",
     "cordova-plugin-network-information": "^3.0.0",
