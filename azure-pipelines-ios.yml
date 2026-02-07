@@ -1,0 +1,73 @@
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'macOS-14'
+
+variables:
+  XCODE_VERSION: '15.2'
+
+steps:
+  - task: NodeTool@0
+    displayName: 'Setup Node.js'
+    inputs:
+      versionSpec: '18.x'
+
+  - script: npm ci
+    displayName: 'Install dependencies'
+
+  - script: npx cordova platform add ios@7.1.1
+    displayName: 'Add iOS platform'
+
+  - script: |
+      sed -i '' "s/TEAM_ID_PLACEHOLDER/$(APPLE_TEAM_ID)/g" build.json
+    displayName: 'Update Team ID in build.json'
+
+  - script: |
+      KEYCHAIN_PATH=$AGENT_TEMPDIRECTORY/app-signing.keychain-db
+      KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+      security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+      security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+      security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      echo "$(IOS_DISTRIBUTION_CERT_P12_BASE64)" | base64 --decode > certificate.p12
+      security import certificate.p12 -k "$KEYCHAIN_PATH" -P "$(IOS_DISTRIBUTION_CERT_PASSWORD)" -T /usr/bin/codesign
+      security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      security list-keychains -d user -s "$KEYCHAIN_PATH"
+      security default-keychain -s "$KEYCHAIN_PATH"
+
+      rm certificate.p12
+    displayName: 'Import code signing certificate'
+
+  - script: |
+      mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+      echo "$(IOS_PROVISIONING_PROFILE_BASE64)" | base64 --decode > ~/Library/MobileDevice/Provisioning\ Profiles/profile.mobileprovision
+    displayName: 'Install provisioning profile'
+
+  - script: npm run release:ios
+    displayName: 'Build iOS app (release)'
+
+  - task: PublishBuildArtifacts@1
+    displayName: 'Upload IPA artifact'
+    inputs:
+      PathtoPublish: 'platforms/ios/build/device'
+      ArtifactName: 'ios-app'
+      publishLocation: 'Container'
+
+  - script: |
+      KEYCHAIN_PATH=$AGENT_TEMPDIRECTORY/app-signing.keychain-db
+      if [ -f "$KEYCHAIN_PATH" ]; then
+        security delete-keychain "$KEYCHAIN_PATH"
+      fi
+    displayName: 'Clean up keychain'
+    condition: always()

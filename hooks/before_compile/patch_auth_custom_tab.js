@@ -16,6 +16,11 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = function (context) {
+    // Skip if not building for Android
+    if (!context.opts.platforms.includes('android')) {
+        return;
+    }
+
     const javaFilePath = path.join(
         context.opts.projectRoot,
         'platforms', 'android', 'CordovaLib', 'src',
