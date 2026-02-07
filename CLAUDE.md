@@ -28,12 +28,14 @@ cordova run android
 **Framework:** Apache Cordova 13.0.0 with cordova-android 14.0.1
 
 **Entry Flow:**
+
 1. `www/index.html` loads as entry point with splash screen
 2. `www/js/index.js` handles Cordova `deviceready` event
 3. Network connectivity check via cordova-plugin-network-information
 4. On success, navigates to https://www.3dprintlog.com
 
 **Key Plugins:**
+
 - `cordova-plugin-network-information` - Network connectivity detection
 - `cordova-plugin-customurlscheme` - Custom URL scheme (com.printlog.app://) for OAuth callbacks
 - `cordova-plugin-dialogs` - Native alert dialogs
@@ -41,9 +43,10 @@ cordova run android
 - `cordova-plugin-statusbar` - Status bar customization (indigo #3F50B5)
 
 **Allowed Navigation Domains (config.xml):**
+
 - https://www.3dprintlog.com/*
-- https://*.auth0.com/*
-- https://*.google.com/*
+- https://_.auth0.com/_
+- https://_.google.com/_
 
 ## Key Files
 
@@ -51,7 +54,7 @@ cordova run android
 - `www/index.html` - Entry point HTML
 - `www/js/index.js` - Device ready handler and navigation logic
 - `platforms/android/` - Android platform build files (generated — do not edit directly)
-- `hooks/before_compile/patch_camera_permission.js` - Build hook that patches WebView camera permission handling
+- `hooks/before_compile/patch_camera_permission.js` - Build hook that patches WebView camera permission handling (see Build Notes)
 
 ## Build Notes
 
@@ -59,5 +62,16 @@ cordova run android
 - Release builds require signing with AndroidKeyStore/KeyStore.jks
 - User agent is overridden to "Mozilla/5.0 Google" for Google login compatibility
 - `platforms/android/` is generated — changes there are lost on `cordova platform remove/add`. Use `config.xml`, hooks, or plugins for persistent changes.
-- A `before_compile` hook patches `SystemWebChromeClient.java` to request Android's runtime CAMERA permission on demand when the website requests camera access (e.g. QR scanning). Without this patch, the WebView auto-grants the web permission but never triggers the Android runtime prompt, causing camera access to silently fail.
+- The `before_compile` hook (`hooks/before_compile/patch_camera_permission.js`) patches `SystemWebChromeClient.java` in two places. Each patch is independently idempotent:
+  1. **`onPermissionRequest`** (WebRTC path) — requests CAMERA runtime permission when a page calls `getUserMedia()` (e.g. QR scanning). Without this, the WebView auto-grants the web permission but never triggers the Android runtime prompt.
+  2. **`onShowFileChooser`** (file input path) — wraps the method so that `<input type="file" capture="environment">` requests CAMERA runtime permission before opening the chooser. The original body is extracted to `showFileChooserImpl(callback, params, allowCapture)`. If permission is denied, the chooser still opens but without the camera option.
 - Android build tools 35.0.0 is required (cordova-android 14.0.1 targets SDK 35)
+
+## Companion UI Repository
+
+The web UI lives in the `print-log-ui` repo (Angular). When both repos need coordinated changes:
+
+- The UI worktree for in-progress feature work is at `../print-log-ui/.worktrees/<branch-name>/`
+- The UI repo remote is on Azure DevOps (`dev.azure.com/HoffmanEngineering/3D Print Log/_git/3D Print Log UI`)
+- The UI exposes `isCordova` (from `src/app/core/utils/platform`) on components that need Cordova-specific behavior
+- Use `capture="environment"` on hidden file inputs to let Android's native chooser offer Camera/Files — no need for a custom mat-menu
