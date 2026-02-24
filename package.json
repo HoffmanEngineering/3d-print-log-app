@@ -1,5 +1,5 @@
 {
-  "name": "com.printlog.app",
+  "name": "com.hoffmanengineering.printlog",
   "displayName": "3D Print Log",
   "version": "1.0.0",
   "description": "A sample Apache Cordova application that responds to the deviceready event.",
@@ -32,13 +32,13 @@
       "cordova-plugin-statusbar": {},
       "cordova-plugin-splashscreen": {},
       "cordova-plugin-customurlscheme": {
-        "URL_SCHEME": "com.printlog.app",
-        "ANDROID_PATHPREFIX": "/cordova/com.printlog.app/callback"
+        "URL_SCHEME": "com.hoffmanengineering.printlog",
+        "ANDROID_PATHPREFIX": "/cordova/com.hoffmanengineering.printlog/callback"
       }
     },
     "platforms": [
-      "android",
-      "ios"
+      "ios",
+      "android"
     ]
   }
 }

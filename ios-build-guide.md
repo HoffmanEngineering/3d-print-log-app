@@ -34,7 +34,7 @@
 
 4. **Create App ID**:
    - developer.apple.com → Identifiers → "+"
-   - App ID: `com.printlog.app`
+   - App ID: `com.hoffmanengineering.printlog`
    - Capabilities: Associated Domains (for custom URL scheme)
 
 5. **Generate Distribution Certificate**:
@@ -48,7 +48,7 @@
 
 6. **Create Provisioning Profile**:
    - developer.apple.com → Profiles → "+"
-   - Type: App Store, App ID: com.printlog.app
+   - Type: App Store, App ID: com.hoffmanengineering.printlog
    - Download and convert to base64:
      ```bash
      base64 -i profile.mobileprovision | pbcopy
@@ -74,8 +74,8 @@
 
 10. **Configure Auth0**:
     - Auth0 Dashboard → Application Settings
-    - Add to Allowed Callback URLs: `com.printlog.app://`
-    - Add to Allowed Logout URLs: `com.printlog.app://`
+    - Add to Allowed Callback URLs: `com.hoffmanengineering.printlog://`
+    - Add to Allowed Logout URLs: `com.hoffmanengineering.printlog://`
 
 ---
 
@@ -105,7 +105,7 @@
 
 1. **Create App in App Store Connect**:
    - appstoreconnect.apple.com → My Apps → "+"
-   - Bundle ID: com.printlog.app
+   - Bundle ID: com.hoffmanengineering.printlog
    - Add metadata: description, keywords, privacy policy URL
 
 2. **Prepare Assets**:
@@ -155,7 +155,7 @@
 **Solution**:
 - Verify Team ID is correct 10-character string
 - Re-export certificate as .p12 from Keychain Access
-- Ensure provisioning profile is "App Store" type for App ID `com.printlog.app`
+- Ensure provisioning profile is "App Store" type for App ID `com.hoffmanengineering.printlog`
 - Test base64 encoding: `echo "$B64" | base64 --decode > test.p12` should create valid file
 
 ---

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 3D Print Log is an Apache Cordova hybrid mobile application that serves as a WebView wrapper for https://www.3dprintlog.com. The app handles device initialization, network connectivity checks, and authentication flows (Auth0, Google OAuth) before redirecting to the main web application.
 
-**App ID:** com.printlog.app
+**App ID:** com.hoffmanengineering.printlog
 **Version:** 1.1.4
 **Platforms:** Android, iOS (in progress)
 
@@ -42,7 +42,7 @@ cordova run ios
 **Key Plugins:**
 
 - `cordova-plugin-network-information` - Network connectivity detection
-- `cordova-plugin-customurlscheme` - Custom URL scheme (com.printlog.app://) for OAuth callbacks
+- `cordova-plugin-customurlscheme` - Custom URL scheme (com.hoffmanengineering.printlog://) for OAuth callbacks
 - `cordova-plugin-dialogs` - Native alert dialogs
 - `cordova-plugin-splashscreen` - Splash screen management
 - `cordova-plugin-statusbar` - Status bar customization (indigo #3F50B5)
