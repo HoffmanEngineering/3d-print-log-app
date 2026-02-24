@@ -1,5 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="com.hoffmanengineering.printlog" version="1.1.4" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
+<widget id="com.hoffmanengineering.printlog" version="1.1.5" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
     <name>3D Print Log</name>
     <description>
         Easily log and track your 3D prints. Record print times, filament usage, settings and more. Quickly search for past 3D prints.
