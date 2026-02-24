@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **App ID:** com.printlog.app
 **Version:** 1.1.4
-**Primary Platform:** Android
+**Platforms:** Android, iOS (in progress)
 
 ## Build Commands
 
@@ -21,11 +21,16 @@ npm run release:android
 
 # Run on connected device/emulator
 cordova run android
+
+# iOS (requires macOS with Xcode)
+npm run build:ios
+npm run release:ios
+cordova run ios
 ```
 
 ## Architecture
 
-**Framework:** Apache Cordova 13.0.0 with cordova-android 14.0.1
+**Framework:** Apache Cordova 13.0.0 with cordova-android 14.0.1 and cordova-ios 7.1.1
 
 **Entry Flow:**
 
@@ -54,6 +59,9 @@ cordova run android
 - `www/index.html` - Entry point HTML
 - `www/js/index.js` - Device ready handler and navigation logic
 - `platforms/android/` - Android platform build files (generated — do not edit directly)
+- `platforms/ios/` - iOS platform build files (generated — do not edit directly)
+- `build.json` - Code signing config for Android (keystore) and iOS (Team ID, provisioning)
+- `azure-pipelines-ios.yml` - Azure Pipelines CI/CD for iOS builds (macOS agent)
 - `hooks/before_compile/patch_camera_permission.js` - Build hook that patches WebView camera permission handling (see Build Notes)
 
 ## Build Notes
@@ -66,6 +74,16 @@ cordova run android
   1. **`onPermissionRequest`** (WebRTC path) — requests CAMERA runtime permission when a page calls `getUserMedia()` (e.g. QR scanning). Without this, the WebView auto-grants the web permission but never triggers the Android runtime prompt.
   2. **`onShowFileChooser`** (file input path) — wraps the method so that `<input type="file" capture="environment">` requests CAMERA runtime permission before opening the chooser. The original body is extracted to `showFileChooserImpl(callback, params, allowCapture)`. If permission is denied, the chooser still opens but without the camera option.
 - Android build tools 35.0.0 is required (cordova-android 14.0.1 targets SDK 35)
+- Both Android-specific hooks (`patch_camera_permission.js`, `patch_auth_custom_tab.js`) have platform guards that skip when not building for Android
+
+## iOS Build Notes
+
+- iOS builds require macOS with Xcode (use Azure Pipelines for CI/CD)
+- `build.json` contains iOS code signing config with `TEAM_ID_PLACEHOLDER` — replaced at build time in CI
+- Minimum deployment target: iOS 13.0
+- WKWebView only (UIWebView removed)
+- Permission descriptions in config.xml `<platform name="ios">` section (required for App Store)
+- Azure Pipelines workflow (`azure-pipelines-ios.yml`) requires 4 secret variables: `APPLE_TEAM_ID`, `IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`
 
 ## Companion UI Repository
 

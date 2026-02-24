@@ -7,7 +7,9 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build:android": "cordova build android",
-    "release:android": "cordova build android --prod --release -- --keystore=../AndroidKeyStore/KeyStore.jks --storePassword=***REMOVED*** --alias=ChrisUpload --password=***REMOVED*** --packageType=bundle"
+    "release:android": "cordova build android --prod --release --buildConfig=build.json",
+    "build:ios": "cordova build ios",
+    "release:ios": "cordova build ios --prod --release --buildConfig=build.json"
   },
   "keywords": [
     "ecosystem:cordova"
@@ -16,6 +18,7 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "cordova-android": "^14.0.1",
+    "cordova-ios": "^7.1.1",
     "cordova-plugin-customurlscheme": "^5.0.2",
     "cordova-plugin-dialogs": "^2.0.2",
     "cordova-plugin-network-information": "^3.0.0",
@@ -34,7 +37,8 @@
       }
     },
     "platforms": [
-      "android"
+      "android",
+      "ios"
     ]
   }
 }
