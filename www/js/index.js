@@ -25,6 +25,6 @@ function onDeviceReady() {
   if (navigator.connection.type == Connection.NONE) {
     navigator.notification.alert("An internet connection is required to continue");
   } else {
-    window.location = "https://www.3dprintlog.com";
+    window.location.replace("https://www.3dprintlog.com");
   }
 }

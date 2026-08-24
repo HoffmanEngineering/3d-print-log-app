@@ -49,4 +49,5 @@
     <preference name="FadeSplashScreenDuration" value="0"/>
     <hook type="before_compile" src="hooks/before_compile/patch_camera_permission.js" />
     <hook type="before_compile" src="hooks/before_compile/patch_auth_custom_tab.js" />
+    <hook type="before_compile" src="hooks/before_compile/patch_back_navigation.js" />
 </widget>
