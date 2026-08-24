@@ -1,0 +1,9 @@
+* @ChristopherHoffman
+
+# Maintainer review required for CI/CD, signing, native patches, and AI agent config
+.github/workflows/          @ChristopherHoffman
+.github/CODEOWNERS          @ChristopherHoffman
+CLAUDE.md                   @ChristopherHoffman
+.claude/                    @ChristopherHoffman
+config.xml                  @ChristopherHoffman
+hooks/                      @ChristopherHoffman
