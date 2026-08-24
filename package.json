@@ -38,7 +38,9 @@
       "cordova-plugin-splashscreen": {},
       "cordova-plugin-customurlscheme": {
         "URL_SCHEME": "com.hoffmanengineering.printlog",
-        "ANDROID_PATHPREFIX": "/cordova/com.hoffmanengineering.printlog/callback"
+        "ANDROID_PATHPREFIX": "/cordova/com.hoffmanengineering.printlog/callback",
+        "ANDROID_SCHEME": " ",
+        "ANDROID_HOST": " "
       }
     },
     "platforms": [
