@@ -34,7 +34,18 @@ Three spec statements were checked against reality and corrected here. The spec 
 | Match siblings: "projects disabled" | Both siblings have `has_projects: true` | Leave projects enabled |
 | `softprops/action-gh-release@v2`, SHA-pinned | Current release line is **v3.0.2** | Pin `v3.0.2` = `3d0d9888cb7fd7b750713d6e236d1fcb99157228` |
 
-One deliberate divergence from the siblings is retained: **`3d-print-log-ui` has no branch protection at all** (`gh api .../branches/main/protection` → 404). Task 12 still applies protection to `3d-print-log-app`, because this repo is about to hold release-signing secrets. This is an intentional improvement, not an oversight. If the user prefers strict parity with the siblings, skip Step 12.5 only.
+A fourth spec assumption was corrected after the user challenged it. The spec's "match the siblings" instruction was initially applied by querying `gh api .../branches/main/protection`, which returns **404** on both siblings — but that is the *legacy* endpoint, and both repos are protected by **rulesets** instead. A 404 there is not evidence of an unprotected repository.
+
+The real sibling pattern, replicated in Task 12:
+
+| Layer | Configuration |
+|---|---|
+| Branch ruleset `main`, targeting `~DEFAULT_BRANCH` | `deletion`, `non_fast_forward`, and `pull_request` with 1 required approving review, `dismiss_stale_reviews_on_push: true`, `require_extra_approval_for_unattributed_changes: true`, all three merge methods allowed |
+| Tag ruleset `All Tags`, targeting `~ALL` | `deletion`, `non_fast_forward`, `creation`, `update` |
+| Both rulesets | `bypass_actors: [{actor_id: 5, actor_type: RepositoryRole, bypass_mode: always}]` — admins bypass |
+| `production` environment | `required_reviewers: ChristopherHoffman` (`prevent_self_review: false`), deployment branch policies `main` (branch) and `v*` (tag) |
+
+Neither sibling configures a required status check, so this plan does not either — `ci.yml` reports on PRs without being a hard merge gate. Two consequences flow from this pattern and are handled where they land: the tag ruleset blocks tag *creation* (Task 13's test tag depends on the admin bypass), and the environment's required reviewer *pauses* every release run for manual approval before the signing steps execute.
 
 ---
 
@@ -866,7 +877,7 @@ web-UI bugs to the right repository."
 
 **Interfaces:**
 - Consumes: the pinned `cordova` devDependency from Task 4
-- Produces: a job named **`build`** — Task 12's branch protection references this exact name
+- Produces: a job named **`build`** — the name a `required_status_checks` rule would reference if CI is ever made a hard merge gate (Task 12 Step 6). Keep it stable.
 
 - [ ] **Step 1: Create `.github/workflows/ci.yml`**
 
@@ -932,7 +943,7 @@ Notes for the implementer:
 cd D:/Development/3d-print-log/print-log-app
 node -e "
 const s=require('fs').readFileSync('.github/workflows/ci.yml','utf8');
-if(!/^\s{2}build:/m.test(s)) throw new Error('job must be named build - branch protection depends on it');
+if(!/^\s{2}build:/m.test(s)) throw new Error('job must be named build - the optional required-check rule references this name');
 if(!/permissions:/.test(s)) throw new Error('missing permissions block');
 console.log('ci.yml structure OK');
 "
@@ -1263,14 +1274,47 @@ gh api -X PUT repos/HoffmanEngineering/3d-print-log-app/topics \
   -f "names[]=open-source"
 ```
 
-- [ ] **Step 3: Create the `production` environment**
+- [ ] **Step 3: Create the `production` environment with reviewer and branch policies**
+
+Both siblings gate `production` behind a required reviewer and restrict it to `main` plus `v*` tags. Replicate that exactly. `ChristopherHoffman` is user id `19898400`.
 
 ```bash
-gh api -X PUT repos/HoffmanEngineering/3d-print-log-app/environments/production
-gh api repos/HoffmanEngineering/3d-print-log-app/environments --jq '.environments[].name'
+gh api -X PUT repos/HoffmanEngineering/3d-print-log-app/environments/production \
+  --input - <<'JSON'
+{
+  "prevent_self_review": false,
+  "reviewers": [
+    { "type": "User", "id": 19898400 }
+  ],
+  "deployment_branch_policy": {
+    "protected_branches": false,
+    "custom_branch_policies": true
+  }
+}
+JSON
 ```
 
-Expected: `production` listed. `release.yml` references it, and a workflow naming a nonexistent environment fails at startup.
+Then add the two allowed refs. Without the `v*` tag policy, the release workflow refuses to start on a tag — the environment would reject the deployment ref.
+
+```bash
+gh api -X POST repos/HoffmanEngineering/3d-print-log-app/environments/production/deployment-branch-policies \
+  -f name='main' -f type='branch'
+gh api -X POST repos/HoffmanEngineering/3d-print-log-app/environments/production/deployment-branch-policies \
+  -f name='v*' -f type='tag'
+```
+
+Verify:
+
+```bash
+gh api repos/HoffmanEngineering/3d-print-log-app/environments \
+  --jq '.environments[] | {name, rules:[.protection_rules[].type]}'
+gh api repos/HoffmanEngineering/3d-print-log-app/environments/production/deployment-branch-policies \
+  --jq '.branch_policies[] | "\(.type) \(.name)"'
+```
+
+Expected: `production` with `branch_policy` and `required_reviewers`; policies `branch main` and `tag v*`.
+
+**Consequence to expect in Task 13:** `required_reviewers` means every tagged release *pauses* and waits for manual approval before the signing steps run. This is deliberate — it is a human gate in front of the signing key — but it means the release run will sit at "Waiting" until approved. `prevent_self_review: false` matches the siblings and lets the maintainer approve their own release.
 
 - [ ] **Step 4: USER ACTION — add the four signing secrets**
 
@@ -1305,44 +1349,99 @@ Expected: all four names present.
 gh run list --repo HoffmanEngineering/3d-print-log-app --workflow=ci.yml --limit 3
 ```
 
-Expected: at least one completed run, ideally `success`. If it failed, fix the workflow and push before continuing — Step 6 cannot reference a check that has never reported.
+Expected: at least one completed run, ideally `success`.
 
-If CI failed for an environment reason (a missing Android SDK component on the runner), fix `ci.yml` and push a follow-up commit. Do not proceed to Step 6 on a red CI.
+Step 6 configures no required status check (matching the siblings), so a red CI does not strictly block it. Fix it anyway before continuing: the rulesets in Step 6 require a PR with an approving review for all non-admin changes, which makes fixing a broken workflow measurably more tedious afterwards. If CI failed for an environment reason — a missing Android SDK component on the runner — fix `ci.yml` and push a follow-up commit now.
 
-- [ ] **Step 6: Apply branch protection**
+- [ ] **Step 6: Apply the branch and tag rulesets**
 
-Deliberately last. A required status check that has never reported blocks every merge, including the fix for whatever is wrong — so protection goes on only after the `build` check exists by name.
+The siblings use **rulesets**, not classic branch protection. Querying `/branches/main/protection` on them returns 404, which is an artifact of the legacy endpoint and not an absence of protection — do not conclude from a 404 that a repo is unprotected.
 
-Note this diverges from the siblings, which have no protection at all. It is applied here because this repository holds release-signing secrets.
+Replicate both sibling rulesets verbatim, including the bypass actor. `actor_id: 5` with `actor_type: RepositoryRole` is the admin role; `bypass_mode: always` is what lets the maintainer push and merge without self-approval ceremony while the rules still bind contributors.
+
+Branch ruleset, targeting the default branch:
 
 ```bash
-gh api -X PUT repos/HoffmanEngineering/3d-print-log-app/branches/main/protection \
+gh api -X POST repos/HoffmanEngineering/3d-print-log-app/rulesets \
   --input - <<'JSON'
 {
-  "required_status_checks": {
-    "strict": true,
-    "contexts": ["build"]
+  "name": "main",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [
+    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+  ],
+  "conditions": {
+    "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] }
   },
-  "enforce_admins": false,
-  "required_pull_request_reviews": null,
-  "restrictions": null,
-  "allow_force_pushes": false,
-  "allow_deletions": false
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "require_extra_approval_for_unattributed_changes": true,
+        "allowed_merge_methods": ["merge", "squash", "rebase"]
+      }
+    }
+  ]
 }
 JSON
 ```
 
-`enforce_admins: false` and `required_pull_request_reviews: null` keep a solo maintainer able to work without self-approval ceremony, while still blocking force pushes, branch deletion, and merges over a red build.
+Tag ruleset, targeting all tags:
+
+```bash
+gh api -X POST repos/HoffmanEngineering/3d-print-log-app/rulesets \
+  --input - <<'JSON'
+{
+  "name": "All Tags",
+  "target": "tag",
+  "enforcement": "active",
+  "bypass_actors": [
+    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+  ],
+  "conditions": {
+    "ref_name": { "include": ["~ALL"], "exclude": [] }
+  },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "creation" },
+    { "type": "update" }
+  ]
+}
+JSON
+```
+
+Two ordering notes:
+
+- The tag ruleset blocks tag **creation**. `v1.1.6` was already pushed in Task 11, before this ruleset existed, so it is unaffected. The `v1.1.7-rc1` test tag in Task 13 is created *after* this ruleset — that works only via the admin bypass. If tag creation is ever rejected, the bypass actor is missing or wrong, not the tag.
+- No required status check is configured, matching both siblings. `ci.yml` still runs on every PR and its result is visible; it simply is not a hard merge gate. This is a deliberate parity decision — if you want CI to block merges here, add a `required_status_checks` rule with `{"context": "build"}` to the branch ruleset, but only after CI has reported at least once, since a check that has never run blocks every merge including the fix.
 
 - [ ] **Step 7: Verify the configuration**
 
 ```bash
 gh api repos/HoffmanEngineering/3d-print-log-app --jq '{description,topics,has_issues,has_wiki,has_projects,delete_branch_on_merge}'
-gh api repos/HoffmanEngineering/3d-print-log-app/branches/main/protection --jq '{checks:.required_status_checks.contexts,force:.allow_force_pushes.enabled,del:.allow_deletions.enabled}'
+gh api repos/HoffmanEngineering/3d-print-log-app/rulesets --jq '.[] | "\(.target) \(.name) \(.enforcement)"'
+gh api repos/HoffmanEngineering/3d-print-log-app/rules/branches/main --jq '[.[].type]'
 gh secret list --env production --repo HoffmanEngineering/3d-print-log-app
 ```
 
-Expected: settings as set; protection requiring `build` with force-push and deletion both `false`; four secrets listed.
+Expected: two active rulesets (`branch main`, `tag All Tags`); the branch rules listing `deletion`, `non_fast_forward`, `pull_request`; four secrets listed.
+
+Compare against the sibling to confirm parity:
+
+```bash
+diff <(gh api repos/HoffmanEngineering/3d-print-log-ui/rules/branches/main --jq '[.[].type]|sort') \
+     <(gh api repos/HoffmanEngineering/3d-print-log-app/rules/branches/main --jq '[.[].type]|sort') \
+  && echo "branch rules match the UI repo"
+```
 
 Also open the repo's Insights → Community Standards page and confirm every item is checked (README, Code of Conduct, Contributing, License, Security policy, issue and PR templates).
 
@@ -1366,11 +1465,29 @@ git tag v1.1.7-rc1
 git push origin v1.1.7-rc1
 ```
 
-- [ ] **Step 2: Watch the release run**
+- [ ] **Step 2: Approve the pending deployment**
+
+The `production` environment has a required reviewer (Task 12 Step 3), so the run does **not** start executing — it sits at "Waiting" until approved. This is expected, not a hang.
 
 ```bash
-gh run watch --repo HoffmanEngineering/3d-print-log-app \
-  $(gh run list --repo HoffmanEngineering/3d-print-log-app --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+RUN_ID=$(gh run list --repo HoffmanEngineering/3d-print-log-app --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+echo "Run: $RUN_ID"
+gh api repos/HoffmanEngineering/3d-print-log-app/actions/runs/$RUN_ID/pending_deployments \
+  --jq '.[] | {env:.environment.name, waiting:.current_user_can_approve}'
+```
+
+Expected: `production` with `waiting: true`. Approve it — either in the browser via the run's "Review deployments" button, or:
+
+```bash
+ENV_ID=$(gh api repos/HoffmanEngineering/3d-print-log-app/environments/production --jq '.id')
+gh api -X POST repos/HoffmanEngineering/3d-print-log-app/actions/runs/$RUN_ID/pending_deployments \
+  -F "environment_ids[]=$ENV_ID" -f state=approved -f comment='release path verification'
+```
+
+- [ ] **Step 3: Watch the release run**
+
+```bash
+gh run watch --repo HoffmanEngineering/3d-print-log-app "$RUN_ID"
 ```
 
 Expected: all steps succeed, including `Verify the bundle was signed`.
@@ -1379,12 +1496,15 @@ Common first-run failures and their causes:
 
 | Failure | Cause |
 |---|---|
+| Run never leaves "Waiting" | Pending deployment not approved — see Step 2 |
+| Run rejected before starting, ref not permitted | The `v*` **tag** deployment-branch-policy is missing from `production` (Task 12 Step 3) |
+| Tag push itself rejected | The `All Tags` ruleset blocks creation and the admin bypass actor is missing (Task 12 Step 6) |
 | `Resource not accessible by integration` at the release step | `permissions: contents: write` missing or overridden by an org default |
 | `base64: invalid input` | Secret created without `-w0` (wrapped base64) |
 | `Environment 'production' not found` | Task 12 Step 3 skipped |
 | Signature verification step fails | Wrong alias or password — `build.json` was written but Cordova fell back to unsigned |
 
-- [ ] **Step 3: Verify the published artifact is signed with the expected key**
+- [ ] **Step 4: Verify the published artifact is signed with the expected key**
 
 ```bash
 gh release download v1.1.7-rc1 --repo HoffmanEngineering/3d-print-log-app --pattern '*.aab' --dir /tmp/relcheck
@@ -1394,7 +1514,7 @@ keytool -printcert -jarfile /tmp/relcheck/*.aab | grep -A2 'SHA256:'
 
 Expected: the SHA-256 fingerprint matches the one recorded in Task 10 Step 3. **A mismatch means the CI-signed artifact would be rejected by Play Store** — investigate before shipping any real release.
 
-- [ ] **Step 4: Delete the test release and tag**
+- [ ] **Step 5: Delete the test release and tag**
 
 ```bash
 gh release delete v1.1.7-rc1 --repo HoffmanEngineering/3d-print-log-app --yes --cleanup-tag
@@ -1405,7 +1525,7 @@ gh release list --repo HoffmanEngineering/3d-print-log-app
 
 Expected: no `v1.1.7-rc1` release or tag remaining.
 
-- [ ] **Step 5: Delete the secret-bearing backup**
+- [ ] **Step 6: Delete the secret-bearing backup**
 
 The mirror backup deliberately retains the leaked credential and must not outlive the migration.
 
@@ -1417,9 +1537,9 @@ rm -f "$SCRATCH"/stash*.patch
 ls "$SCRATCH"
 ```
 
-Only do this once Steps 1–4 have passed. Until then, the backup is the restore path.
+Only do this once Steps 1–5 have passed. Until then, the backup is the restore path.
 
-- [ ] **Step 6: Update `CLAUDE.md`**
+- [ ] **Step 7: Update `CLAUDE.md`**
 
 The project instructions still describe an Azure-hosted repo. Update the Build Notes and iOS sections to say: the repository is at `github.com/HoffmanEngineering/3d-print-log-app`; CI is GitHub Actions (`ci.yml`, `release.yml`); releases are cut by pushing a `v*` tag; and `azure-pipelines-ios.yml` plus `ios-build-guide.md` are unimplemented design artifacts.
 
@@ -1430,7 +1550,7 @@ git commit -m "docs: update CLAUDE.md for GitHub migration"
 git push origin main
 ```
 
-- [ ] **Step 7: USER ACTION — archive the Azure DevOps repository**
+- [ ] **Step 8: USER ACTION — archive the Azure DevOps repository**
 
 Left to the user by design. Until it is archived it remains the only record of the Azure PR discussions and work-item links, which this migration explicitly does not carry over. Retrieve anything wanted from there first, then archive rather than delete.
 
