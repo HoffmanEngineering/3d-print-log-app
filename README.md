@@ -82,6 +82,12 @@ In CI, the tagged-release workflow reconstructs `build.json` from repository sec
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and feature requests are welcome via [issues](https://github.com/HoffmanEngineering/3d-print-log-app/issues).
 
+## Questions & Discussions
+
+Usage questions are best asked in [**3D Print Log Discussions**](https://github.com/HoffmanEngineering/3d-print-log-ui/discussions/categories/q-a). That board is the front door for the whole project — the web app, the API, this app, and both slicer plugins — so you do not have to work out which repository your question belongs to, and answers stay searchable for whoever asks next.
+
+Bug reports and feature requests still belong in this repository's issues.
+
 ## Related repositories
 
 - [3d-print-log-ui](https://github.com/HoffmanEngineering/3d-print-log-ui) — Angular web app
