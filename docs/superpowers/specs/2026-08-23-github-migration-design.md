@@ -46,23 +46,34 @@ records the SHA-256 certificate fingerprint of the current
 `3DPrintLogKeyStore.jks` via `keytool -list -v` and confirms it is the key
 associated with current Play Store uploads.
 
-### The secret reaches further than the reachable-commit graph
+### The credential hides where a ref-walk does not look
 
-Measured on the pre-rewrite repository:
+Measured on the pre-rewrite repository by enumerating blobs rather than counting
+matched lines:
 
 ```
-git log -p --all                          | grep -c <leaked-string>   ->  4
-git cat-file --batch-all-objects --batch  | grep -c <leaked-string>   ->  6
+blobs containing the credential                      ->  8
+of those, reachable only via refs/stash              ->  1
 ```
 
-`git log --all` traverses `refs/heads`, `refs/tags`, and `refs/remotes`. It does
-NOT traverse `refs/stash`. This repository has two stash entries
-(`WIP on master: 5b936e7`, `WIP on master: 654d38c`) dating from the era when
-`package.json` carried the password, and they hold the two additional hits.
+A `git log -p --all | grep` check does not surface that stash-only blob, so it
+reports the repository clean while the credential is still in the object
+database.
 
-Consequence: a `git log -p --all` grep would report the repository clean while
-the secret was still present in the object database. Verification MUST be done at
-the object level, not the ref-traversal level. See Section 1 and Verification.
+The mechanism is worth stating precisely, because the obvious explanation is
+wrong. It is *not* that `--all` fails to traverse `refs/stash`; `git rev-list
+--all` does reach it. It is that **stash entries are merge commits** — `git log
+-1 --format=%p refs/stash` shows two parents — and `git log -p` suppresses diffs
+for merge commits unless given `-m`, `-c`, or `--cc`. The blob is reachable; its
+content is simply never printed.
+
+Counting matched *lines* is also not comparable between the two methods: `git
+log -p` re-prints the same blob once per diff it appears in, so its line count
+can legitimately exceed the number of distinct blobs. Blob identity is the only
+stable unit of measurement here.
+
+Consequence: verification MUST enumerate objects, not walk refs. See Section 1
+and Verification.
 
 ### What is clean
 
@@ -326,9 +337,10 @@ the user archives it, which is the window to retrieve anything wanted.
 
 Before any push:
 
-- **Object-level secret scan** — the gate that matters:
-  `git cat-file --batch-all-objects --batch | grep -c <leaked-string>` returns 0.
-  A `git log -p --all` grep is NOT sufficient (see Findings).
+- **Object-level secret scan** — the gate that matters: enumerate every blob in
+  the object database and confirm none contains the credential. A `git log -p
+  --all` grep is NOT sufficient — it misses at least one stash-only blob (see
+  Findings).
 - `git stash list` is empty and `git for-each-ref` lists only `refs/heads/main`
   and `refs/tags/v1.1.6`.
 - `git ls-files` matches no `build.json`, `.jks`, or `.p12`.

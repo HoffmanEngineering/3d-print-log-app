@@ -157,28 +157,38 @@ IFS= read -r SECRET < "$SCRATCH/leaked-secret.txt"
 git rev-list main > "$SCRATCH/baseline-shas.txt"
 git log --format='%an <%ae> %at | %s' main > "$SCRATCH/baseline-authors.txt"
 
-LOG_HITS=$(git log -p --all | grep -acF -- "$SECRET" || true)
-OBJ_HITS=$(git cat-file --batch-all-objects --batch | grep -acF -- "$SECRET" || true)
+# Enumerate the BLOBS that contain the credential. Counting matching *lines*
+# is not comparable between the two methods: `git log -p` re-prints the same
+# blob once per diff it appears in, so its line count can exceed the number of
+# distinct blobs. Blob identity is the only stable unit.
+git cat-file --batch-all-objects --batch-check='%(objectname) %(objecttype)'  | awk '$2=="blob"{print $1}'  | while read -r o; do
+     git cat-file blob "$o" 2>/dev/null | grep -aqF -- "$SECRET" && echo "$o"
+   done | sort -u > "$SCRATCH/blobs-with-secret.txt"
+
+# Which of those are reachable WITHOUT consulting refs/stash?
+git rev-list --objects --exclude=refs/stash --all  | awk '{print $1}' | sort -u > "$SCRATCH/reachable-nostash.txt"
+
+TOTAL_BLOBS=$(wc -l < "$SCRATCH/blobs-with-secret.txt")
+STASH_ONLY=$(comm -23 "$SCRATCH/blobs-with-secret.txt" "$SCRATCH/reachable-nostash.txt" | wc -l)
 
 {
   echo "=== date ==="; date
   echo "=== refs ==="; git for-each-ref --format='%(refname) %(objectname)'
   echo "=== stashes ==="; git stash list
   echo "=== main commit count ==="; git rev-list --count main
-  echo "=== lines matching via log --all (KNOWN INCOMPLETE) ==="; echo "$LOG_HITS"
-  echo "=== lines matching across all objects (AUTHORITATIVE) ==="; echo "$OBJ_HITS"
+  echo "=== blobs containing the credential (AUTHORITATIVE) ==="; echo "$TOTAL_BLOBS"
+  echo "=== of those, reachable only via refs/stash ==="; echo "$STASH_ONLY"
 } > "$SCRATCH/pre-migration-inventory.txt"
 
 cat "$SCRATCH/pre-migration-inventory.txt"
 
-[ "$OBJ_HITS" -gt 0 ] || { echo "REFUSING: nothing to scrub - repository state unexpected"; exit 1; }
-[ "$OBJ_HITS" -ge "$LOG_HITS" ] || { echo "REFUSING: object scan found fewer hits than ref scan"; exit 1; }
-echo "baseline recorded: log=$LOG_HITS objects=$OBJ_HITS"
+[ "$TOTAL_BLOBS" -gt 0 ] || { echo "REFUSING: nothing to scrub - repository state unexpected"; exit 1; }
+echo "baseline recorded: $TOTAL_BLOBS blob(s) with the credential, $STASH_ONLY stash-only"
 ```
 
-Note these are counts of *matching lines*, not occurrences — that is fine, because the only value that matters downstream is whether the object count reaches exactly zero.
+Expected at time of writing: **8** blobs contain the credential, of which **1** is reachable only via `refs/stash`. The absolute numbers will drift as commits are added; the only value that must hold is `TOTAL_BLOBS > 0`, and the only value that matters downstream is that it reaches exactly **0** after the rewrite.
 
-Expected: object count strictly greater than the log count. That gap is `refs/stash`, and it is the whole reason this plan exists. If the two are equal, the stashes were already cleared; re-read the spec's Findings before continuing.
+Why the stash-only blob is the point of this whole plan: `git log -p --all` does not print it, so a grep over that output reports the repository clean while the credential is still in `.git`. The mechanism is *not* that `--all` skips `refs/stash` — `git rev-list --all` does reach it. It is that **stash entries are merge commits** (`git log -1 --format=%p refs/stash` shows two parents) and `git log -p` suppresses diffs for merge commits unless given `-m`, `-c`, or `--cc`. Enumerating blobs sidesteps the question entirely, which is why it is the gate.
 
 - [ ] **Step 3: Create the mirror backup**
 
