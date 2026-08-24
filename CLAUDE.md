@@ -8,7 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **App ID:** com.hoffmanengineering.printlog
 **Version:** 1.1.6
-**Platforms:** Android, iOS (in progress)
+**Repository:** https://github.com/HoffmanEngineering/3d-print-log-app (public, AGPL-3.0-only)
+**Platforms:** Android (shipping). iOS is **designed but never implemented** — see iOS Build Notes.
 
 ## Build Commands
 
@@ -16,17 +17,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Build development APK
 npm run build:android
 
-# Build signed release bundle (uses keystore credentials from package.json)
+# Build signed release bundle (reads keystore config from build.json, which is gitignored)
 npm run release:android
 
 # Run on connected device/emulator
-cordova run android
+npx cordova run android
 
-# iOS (requires macOS with Xcode)
+# iOS scripts exist but have never been run - see iOS Build Notes
 npm run build:ios
 npm run release:ios
-cordova run ios
 ```
+
+The Cordova CLI is pinned at 13.0.0 in `devDependencies`; `npm install` puts it in
+`node_modules/.bin`. Use the npm scripts or `npx cordova`, not a global install.
+
+## CI/CD
+
+GitHub Actions. There is no Azure DevOps remote.
+
+| Workflow | Trigger | Produces |
+|---|---|---|
+| `.github/workflows/ci.yml` | push / PR to `main` | Unsigned debug APK, uploaded as an artifact (14-day retention) |
+| `.github/workflows/release.yml` | push of a `v*` tag | Signed AAB attached to a GitHub Release |
+
+**Cutting a release:** push a `v*` tag, then approve the pending deployment. The
+release job runs in the `production` environment, which has a required reviewer,
+so it waits at "Waiting" until approved — that is the human gate in front of the
+signing key, not a hang.
+
+Signing secrets live on the `production` environment, not the repository:
+`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+`ANDROID_KEY_PASSWORD`. `release.yml` reconstructs `build.json` from them at run
+time. Never commit `build.json` or a `.jks`.
+
+`main` is protected by a ruleset requiring a PR with one approving review;
+admins bypass. Tags are protected against creation/update/deletion, admins bypass.
 
 ## Architecture
 
@@ -58,10 +83,11 @@ cordova run ios
 - `config.xml` - Cordova configuration (app settings, plugins, permissions, allowed domains)
 - `www/index.html` - Entry point HTML
 - `www/js/index.js` - Device ready handler and navigation logic
+- `.github/workflows/` - CI and release pipelines (see CI/CD above)
 - `platforms/android/` - Android platform build files (generated — do not edit directly)
 - `platforms/ios/` - iOS platform build files (generated — do not edit directly)
 - `build.json` - Code signing config for Android (keystore) and iOS (Team ID, provisioning)
-- `azure-pipelines-ios.yml` - Azure Pipelines CI/CD for iOS builds (macOS agent)
+- `azure-pipelines-ios.yml` - Unimplemented iOS pipeline design; never ran (see iOS Build Notes)
 - `hooks/before_compile/patch_camera_permission.js` - Build hook that patches WebView camera permission handling (see Build Notes)
 
 ## Build Notes
@@ -78,18 +104,28 @@ cordova run ios
 
 ## iOS Build Notes
 
-- iOS builds require macOS with Xcode (use Azure Pipelines for CI/CD)
-- `build.json` contains iOS code signing config with `TEAM_ID_PLACEHOLDER` — replaced at build time in CI
+**iOS has never been built or shipped.** `azure-pipelines-ios.yml` and
+`ios-build-guide.md` are *design artifacts* describing an intended build that was
+never implemented, and the Azure pipeline they reference no longer has a remote to
+run on. Do not treat either file as working configuration or as a source of truth —
+notably not for the Node version, which is **20** everywhere that matters
+(`ios-build-guide.md` and the Azure pipeline say 18).
+
+Implementing iOS means porting to a GitHub Actions macOS runner, not reviving the
+Azure pipeline. The design notes below are what was intended:
+
+- iOS builds require macOS with Xcode
+- `build.json` would carry iOS signing config with `TEAM_ID_PLACEHOLDER`, substituted at build time
 - Minimum deployment target: iOS 13.0
 - WKWebView only (UIWebView removed)
-- Permission descriptions in config.xml `<platform name="ios">` section (required for App Store)
-- Azure Pipelines workflow (`azure-pipelines-ios.yml`) requires 4 secret variables: `APPLE_TEAM_ID`, `IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`
+- Permission descriptions live in config.xml `<platform name="ios">` (required for App Store)
+- Four signing secrets were envisaged: `APPLE_TEAM_ID`, `IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`
 
 ## Companion UI Repository
 
 The web UI lives in the `print-log-ui` repo (Angular). When both repos need coordinated changes:
 
 - The UI worktree for in-progress feature work is at `../print-log-ui/.worktrees/<branch-name>/`
-- The UI repo remote is on Azure DevOps (`dev.azure.com/HoffmanEngineering/3D Print Log/_git/3D Print Log UI`)
+- The UI repo is on GitHub at `HoffmanEngineering/3d-print-log-ui` (it also retains an `azure` remote)
 - The UI exposes `isCordova` (from `src/app/core/utils/platform`) on components that need Cordova-specific behavior
 - Use `capture="environment"` on hidden file inputs to let Android's native chooser offer Camera/Files — no need for a custom mat-menu
