@@ -50,8 +50,17 @@ Signing secrets live on the `production` environment, not the repository:
 `ANDROID_KEY_PASSWORD`. `release.yml` reconstructs `build.json` from them at run
 time. Never commit `build.json` or a `.jks`.
 
-`main` is protected by a ruleset requiring a PR with one approving review;
-admins bypass. Tags are protected against creation/update/deletion, admins bypass.
+**Nobody can push to `main` — not even admins.** The branch ruleset uses
+`bypass_mode: pull_request`, so the maintainer's bypass covers only the
+approving-review requirement when merging a PR, never a direct push. A
+`git push origin main` is rejected with "Changes must be made through a pull
+request." Every change goes through a PR, including version bumps; use the
+`/release` skill, which does this for you.
+
+Tags are protected against creation, update, and deletion, with
+`bypass_mode: always` for the maintainer — creating a tag is not a PR
+operation, so it has no PR path to take instead. This is what lets a release
+tag be pushed.
 
 ## Architecture
 

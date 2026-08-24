@@ -49,6 +49,10 @@ echo "ready"
 
 Stop and report if any check fails. Do not offer to force past them.
 
+Note the branch check is that you are *starting* from a clean, current `main` —
+the bump itself lands on a `release/*` branch via a PR, never on `main`
+directly.
+
 ### 2. Compute the new version and confirm it with the user
 
 Read the current version from `config.xml`, apply the bump, and check the
@@ -95,20 +99,63 @@ All three must show the new version, and the diff should touch exactly
 `config.xml`, `package.json`, `package-lock.json`, and `CLAUDE.md`. Anything
 else in the diff means something went wrong — stop.
 
-### 5. Commit, tag, push
+### 5. Land the bump through a pull request
+
+**`main` rejects direct pushes from everyone, including admins.** The branch
+ruleset uses `bypass_mode: pull_request`, so the maintainer's bypass applies
+only to the approval requirement when merging a PR — never to a direct push.
+`git push origin main` will be rejected with "Changes must be made through a
+pull request." Do not try to work around it.
 
 ```bash
+git checkout -b release/vNEW
 git add config.xml package.json package-lock.json CLAUDE.md
 git commit -m "chore: release vNEW"
+git push -u origin release/vNEW
+
+gh pr create --base main --title "chore: release vNEW" \
+  --body "Version bump to vNEW (versionCode NEWCODE). Tag is pushed after merge."
+```
+
+Wait for CI (`build`) to pass on the PR, then merge.
+
+**The merge needs an explicit admin override.** The ruleset requires one
+approving review, and GitHub does not permit approving your own PR. A plain
+`gh pr merge` fails with *"the base branch policy prohibits the merge"*. The
+`bypass_mode: pull_request` bypass does not waive the requirement silently — it
+permits an override, which must be asked for:
+
+```bash
+gh pr merge --squash --delete-branch --admin
+```
+
+**Do not run this on the user's behalf without asking.** It overrides branch
+protection, and the point of the protection is that a human decides each time.
+Give the user the PR URL and let them merge — in the browser via "Merge without
+waiting for requirements", or with the command above if they prefer. Wait for
+them to confirm the merge landed before tagging.
+
+If a second maintainer ever joins, this override disappears: a real approval
+satisfies the rule and `gh pr merge` works normally.
+
+### 6. Tag the merged commit
+
+Only after the merge, and from an updated `main`. Tagging before the merge
+points the release at a commit that never landed.
+
+```bash
+git checkout main
+git pull origin main
 git tag vNEW
-git push origin main
 git push origin vNEW
 ```
 
-The branch ruleset requires a PR for non-admins; as the maintainer you bypass
-it. Tag creation is likewise blocked for non-admins and allowed by bypass.
+Tag creation is blocked for non-admins by the tag ruleset and permitted for the
+maintainer via `bypass_mode: always`. Unlike the branch rule, this one does
+allow the direct operation — creating a tag is not a PR operation, so there is
+no PR path it could take instead.
 
-### 6. Tell the user to approve the deployment
+### 7. Tell the user to approve the deployment
 
 **This is the step people forget.** The release job runs in the `production`
 environment, which has a required reviewer, so it stops at "Waiting" and does
@@ -128,7 +175,7 @@ gh api -X POST repos/HoffmanEngineering/3d-print-log-app/actions/runs/$RUN_ID/pe
   -F "environment_ids[]=$ENV_ID" -f state=approved -f comment='release'
 ```
 
-### 7. Report where to collect the artifact
+### 8. Report where to collect the artifact
 
 Once the run is green, the signed `.aab` is attached to the GitHub Release for
 the tag. Remind the user of the remaining manual step: download it and upload
@@ -140,11 +187,12 @@ Check the failing step against these, in order of likelihood:
 
 | Symptom | Cause |
 |---|---|
-| Run never leaves "Waiting" | Not approved — step 6 |
+| Run never leaves "Waiting" | Not approved — step 7 |
 | `Resource not accessible by integration` | `permissions: contents: write` missing from the workflow |
 | `base64: invalid input` | `ANDROID_KEYSTORE_BASE64` was set with wrapped base64; re-set it with `base64 -w0` |
 | "bundle is not signed" | Wrong alias or password in the `production` secrets |
 | Play rejects the upload | `versionCode` did not increase — check `config.xml` actually changed |
+| `push declined due to repository rule violations` | Something tried to push to `main` directly — use the PR flow in step 5 |
 
 A failed release is recoverable: delete the tag and release
 (`gh release delete vNEW --cleanup-tag`), fix, and re-run. Never reuse a
