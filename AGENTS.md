@@ -108,7 +108,8 @@ tag be pushed.
 - Cordova Android 15.1 handles native camera and microphone permission requests for `getUserMedia()` upstream.
 - The `before_compile` hook (`hooks/before_compile/patch_camera_permission.js`) retains the file-input path: it wraps `onShowFileChooser` so `<input type="file" capture="environment">` requests CAMERA runtime permission before opening the chooser. The original body is extracted to `showFileChooserImpl(callback, params, allowCapture)`. If permission is denied, the chooser still opens without the camera option.
 - Android build tools 36.0.0 is required (cordova-android 15.1.0 targets SDK 36)
-- Both Android-specific hooks (`patch_camera_permission.js`, `patch_auth_custom_tab.js`) have platform guards that skip when not building for Android
+- The `patch_back_navigation.js` hook makes API 36 predictive-back gestures navigate WebView history before exiting; `www/js/index.js` uses `location.replace()` so the local bootstrap page is not retained in that history.
+- All Android-specific hooks (`patch_camera_permission.js`, `patch_auth_custom_tab.js`, `patch_back_navigation.js`) have platform guards that skip when not building for Android
 
 ## iOS Build Notes
 

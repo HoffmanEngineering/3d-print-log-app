@@ -51,8 +51,9 @@ npx cordova run android
 
 - `patch_camera_permission.js` — makes the WebView request the Android runtime CAMERA permission. The WebView auto-grants the *web* permission but never triggers the OS prompt, so QR scanning and `<input type="file" capture="environment">` would silently fail without this.
 - `patch_auth_custom_tab.js` — routes Auth0 `/authorize` URLs to a Chrome Custom Tab so Google sign-in works.
+- `patch_back_navigation.js` — routes Android predictive-back gestures through WebView history before allowing the activity to exit.
 
-Both are idempotent and skip when the build target is not Android.
+All are idempotent and skip when the build target is not Android.
 
 ## Release signing
 
