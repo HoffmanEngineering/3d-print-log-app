@@ -2,17 +2,12 @@
 
 /**
  * Cordova before_compile hook
- * Patches SystemWebChromeClient.java to request the CAMERA runtime permission
- * on demand in two scenarios:
+ * Patches SystemWebChromeClient.java so that <input type="file" capture>
+ * requests the CAMERA runtime permission before opening the file chooser.
  *
- * 1. onPermissionRequest (WebRTC path) — when a web page requests camera
- *    access via getUserMedia() (e.g. QR scanning).
- *
- * 2. onShowFileChooser (file input path) — when a <input type="file" capture>
- *    triggers the Android file chooser with camera capture enabled.
- *
- * Without these patches the WebView auto-grants the web permission but never
- * triggers the Android runtime prompt, causing camera access to silently fail.
+ * Cordova Android 15.1 handles getUserMedia camera and microphone
+ * permissions upstream, so this hook intentionally leaves
+ * onPermissionRequest unchanged.
  */
 
 const fs = require('fs');
@@ -38,62 +33,13 @@ module.exports = function (context) {
     let content = fs.readFileSync(filePath, 'utf8');
     let modified = false;
 
-    // ── Import ContextCompat (needed by both patches) ──────────────────
+    // ── Import ContextCompat (needed by the file chooser patch) ─────────
     if (!content.includes('import androidx.core.content.ContextCompat;')) {
         content = content.replace(
             'import androidx.core.content.FileProvider;',
             'import androidx.core.content.ContextCompat;\nimport androidx.core.content.FileProvider;'
         );
         modified = true;
-    }
-
-    // ── Patch 1: onPermissionRequest (WebRTC / getUserMedia) ───────────
-    if (!content.includes('needsCamera')) {
-        const original = [
-            '    @Override',
-            '    public void onPermissionRequest(final PermissionRequest request) {',
-            '        LOG.d(LOG_TAG, "onPermissionRequest: " + Arrays.toString(request.getResources()));',
-            '        request.grant(request.getResources());',
-            '    }'
-        ].join('\n');
-
-        const patched = [
-            '    @Override',
-            '    public void onPermissionRequest(final PermissionRequest request) {',
-            '        LOG.d(LOG_TAG, "onPermissionRequest: " + Arrays.toString(request.getResources()));',
-            '',
-            '        boolean needsCamera = false;',
-            '        for (String resource : request.getResources()) {',
-            '            if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {',
-            '                needsCamera = true;',
-            '                break;',
-            '            }',
-            '        }',
-            '',
-            '        if (needsCamera && ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.CAMERA)',
-            '                != PackageManager.PERMISSION_GRANTED) {',
-            '            parentEngine.cordova.requestPermission(new CordovaPlugin() {',
-            '                @Override',
-            '                public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults) {',
-            '                    if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {',
-            '                        request.grant(request.getResources());',
-            '                    } else {',
-            '                        request.deny();',
-            '                    }',
-            '                }',
-            '            }, 0, android.Manifest.permission.CAMERA);',
-            '        } else {',
-            '            request.grant(request.getResources());',
-            '        }',
-            '    }'
-        ].join('\n');
-
-        if (content.includes(original)) {
-            content = content.replace(original, patched);
-            modified = true;
-        } else {
-            console.warn('WARN: Could not find expected onPermissionRequest — skipping that patch');
-        }
     }
 
     // ── Patch 2: onShowFileChooser (file input with capture) ───────────
@@ -125,7 +71,7 @@ module.exports = function (context) {
             '    public boolean onShowFileChooser(WebView webView, final ValueCallback<Uri[]> filePathsCallback,',
             '            final WebChromeClient.FileChooserParams fileChooserParams) {',
             '        if (fileChooserParams.isCaptureEnabled()',
-            '                && ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.CAMERA)',
+            '                && ContextCompat.checkSelfPermission(parentEngine.getView().getContext(), android.Manifest.permission.CAMERA)',
             '                    != PackageManager.PERMISSION_GRANTED) {',
             '            parentEngine.cordova.requestPermission(new CordovaPlugin() {',
             '                @Override',

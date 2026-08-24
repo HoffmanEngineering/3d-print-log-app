@@ -64,7 +64,7 @@ tag be pushed.
 
 ## Architecture
 
-**Framework:** Apache Cordova 13.0.0 with cordova-android 14.0.1 and cordova-ios 7.1.1
+**Framework:** Apache Cordova 13.0.0 with cordova-android 15.1.0 and cordova-ios 7.1.1
 
 **Entry Flow:**
 
@@ -78,8 +78,8 @@ tag be pushed.
 - `cordova-plugin-network-information` - Network connectivity detection
 - `cordova-plugin-customurlscheme` - Custom URL scheme (com.hoffmanengineering.printlog://) for OAuth callbacks
 - `cordova-plugin-dialogs` - Native alert dialogs
-- `cordova-plugin-splashscreen` - Splash screen management
-- `cordova-plugin-statusbar` - Status bar customization (indigo #3F50B5)
+
+
 
 **Allowed Navigation Domains (config.xml):**
 
@@ -105,10 +105,9 @@ tag be pushed.
 - Release builds require signing with AndroidKeyStore/KeyStore.jks
 - User agent is overridden to "Mozilla/5.0 Google" for Google login compatibility
 - `platforms/android/` is generated — changes there are lost on `cordova platform remove/add`. Use `config.xml`, hooks, or plugins for persistent changes.
-- The `before_compile` hook (`hooks/before_compile/patch_camera_permission.js`) patches `SystemWebChromeClient.java` in two places. Each patch is independently idempotent:
-  1. **`onPermissionRequest`** (WebRTC path) — requests CAMERA runtime permission when a page calls `getUserMedia()` (e.g. QR scanning). Without this, the WebView auto-grants the web permission but never triggers the Android runtime prompt.
-  2. **`onShowFileChooser`** (file input path) — wraps the method so that `<input type="file" capture="environment">` requests CAMERA runtime permission before opening the chooser. The original body is extracted to `showFileChooserImpl(callback, params, allowCapture)`. If permission is denied, the chooser still opens but without the camera option.
-- Android build tools 35.0.0 is required (cordova-android 14.0.1 targets SDK 35)
+- Cordova Android 15.1 handles native camera and microphone permission requests for `getUserMedia()` upstream.
+- The `before_compile` hook (`hooks/before_compile/patch_camera_permission.js`) retains the file-input path: it wraps `onShowFileChooser` so `<input type="file" capture="environment">` requests CAMERA runtime permission before opening the chooser. The original body is extracted to `showFileChooserImpl(callback, params, allowCapture)`. If permission is denied, the chooser still opens without the camera option.
+- Android build tools 36.0.0 is required (cordova-android 15.1.0 targets SDK 36)
 - Both Android-specific hooks (`patch_camera_permission.js`, `patch_auth_custom_tab.js`) have platform guards that skip when not building for Android
 
 ## iOS Build Notes

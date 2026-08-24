@@ -8,7 +8,7 @@
 
 ## Tested on
 
-<!-- e.g. Pixel 7, Android 14 — or "emulator, API 35" -->
+<!-- e.g. Pixel 7, Android 14 — or "emulator, API 36" -->
 
 ## Checklist
 

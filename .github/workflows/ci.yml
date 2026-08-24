@@ -32,7 +32,7 @@ jobs:
         run: npm ci
 
       - name: Add Android platform
-        run: npx cordova platform add android@14.0.1
+        run: npx cordova platform add android@15.1.0
 
       - name: Build debug APK
         run: npm run build:android

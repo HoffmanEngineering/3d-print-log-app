@@ -15,9 +15,9 @@ This is an [Apache Cordova](https://cordova.apache.org/) hybrid app: a native sh
 
 ## Prerequisites
 
-- [Node.js 20+](https://nodejs.org/)
+- [Node.js 20.17+ or 22.9+](https://nodejs.org/)
 - JDK 17
-- Android SDK **35** with build-tools **35.0.0** (cordova-android 14 targets SDK 35)
+- Android SDK **36** with build-tools **36.0.0** (cordova-android 15 targets SDK 36)
 - `ANDROID_HOME` set to your SDK location
 
 ## Getting started
