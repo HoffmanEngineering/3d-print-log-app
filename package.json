@@ -1,8 +1,8 @@
 {
   "name": "com.hoffmanengineering.printlog",
   "displayName": "3D Print Log",
-  "version": "1.0.0",
-  "description": "A sample Apache Cordova application that responds to the deviceready event.",
+  "version": "1.1.6",
+  "description": "Cordova hybrid mobile app for 3D Print Log — log and track your 3D prints, print times, filament usage, and settings.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -14,9 +14,14 @@
   "keywords": [
     "ecosystem:cordova"
   ],
-  "author": "Apache Cordova Team",
-  "license": "Apache-2.0",
+  "author": "Hoffman Engineering",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HoffmanEngineering/3d-print-log-app.git"
+  },
   "devDependencies": {
+    "cordova": "13.0.0",
     "cordova-android": "^14.0.1",
     "cordova-ios": "^7.1.1",
     "cordova-plugin-customurlscheme": "^5.0.2",

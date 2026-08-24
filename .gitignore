@@ -12,3 +12,6 @@ build.json
 
 # Git worktrees
 .worktrees/
+
+# Local APK backups (never publish)
+old-app-backup/
