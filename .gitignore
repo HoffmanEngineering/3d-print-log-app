@@ -18,3 +18,6 @@ old-app-backup/
 
 # Internal planning docs (kept locally, not published)
 docs/superpowers/
+
+# Local Claude Code settings (skills in .claude/skills/ ARE tracked)
+.claude/settings.local.json
