@@ -9,6 +9,16 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same ref makes an in-flight run obsolete. This job installs the
+# Android platform and builds a debug APK, which is among the slower things in the org, so
+# a superseded run should return its runner rather than finish a result nobody reads.
+#
+# Keyed on the PR number when there is one, so a push to a branch and the pull_request run
+# for that same branch do not cancel each other.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
