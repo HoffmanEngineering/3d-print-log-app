@@ -5,13 +5,25 @@ on:
     tags:
       - 'v*'
 
+# Read-only by default; the release job widens it for itself below. Deliberately no
+# concurrency group here -- cancelling a tagged release part-way through signing is worse
+# than letting two run.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Gates the signing keystore behind an approval, which is the point: the secrets in
+    # this job produce a bundle that can be published to Play. Unlike the web app there is
+    # no value in splitting a build job out ahead of the gate, because the build IS the
+    # thing that needs the secrets.
     environment: production
+
+    # Scoped to this job so a future job added to this workflow does not inherit write
+    # access. softprops/action-gh-release needs it to create the release and upload the aab.
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4

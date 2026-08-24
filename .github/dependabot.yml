@@ -1,0 +1,58 @@
+version: 2
+
+# Nothing watched package versions in this repository before this file existed. The other
+# repos gained coverage first (ui#107, api, Slic3r, cura); this is the equivalent here.
+#
+# Everything in package.json is a devDependency, but the tree splits into two groups with
+# very different risk, so they are kept apart deliberately:
+#
+#   - The Cordova platform and CLI decide how the app is built and what Android API level
+#     it targets. A bump here can change the produced APK/AAB without any app code moving.
+#   - The plugins are individually replaceable and mostly independent of each other.
+#
+# Bundling those together would put a routine plugin patch in the same PR as a platform
+# upgrade that needs a device test, which is how a risky change gets waved through.
+#
+# NOT covered here, and easy to assume otherwise:
+#
+#   - **The cordova-android version is declared TWICE.** package.json pins `^14.0.1`, and
+#     both workflows separately hardcode `npx cordova platform add android@14.0.1`.
+#     Dependabot only edits package.json, so accepting a cordova-android PR leaves CI and
+#     the release build still installing the OLD platform -- silently, with a green build.
+#     Any cordova-android bump must update .github/workflows/ci.yml and release.yml too.
+#   - The JDK and Node versions, which are pinned in the workflow files.
+#   - Anything under platforms/. Cordova generates that at build time and it is not
+#     committed, so there is no gradle manifest for Dependabot to read.
+#   - Plugin/platform compatibility. cordova-plugin-splashscreen is already known to be
+#     silently skipped on cordova-android 14 (#1) -- a green build does not prove a plugin
+#     still works on the installed platform.
+
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+    groups:
+      # Deliberately NOT grouped with the plugins -- see above. Kept together as one unit
+      # because the CLI and the two platforms are versioned against each other.
+      cordova-platform:
+        patterns:
+          - 'cordova'
+          - 'cordova-android'
+          - 'cordova-ios'
+
+      cordova-plugins:
+        patterns:
+          - 'cordova-plugin-*'
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - '*'
