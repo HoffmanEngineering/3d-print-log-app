@@ -14,8 +14,22 @@
 
 - Repository root for all commands: `D:/Development/3d-print-log/print-log-app`
 - Scratchpad root (referred to below as `$SCRATCH`): `C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad`
-- The leaked string is **never** written into any committed file. It exists only in `$SCRATCH/secrets.txt`.
-- **Verification is object-level, never ref-traversal.** `git log -p --all | grep` is forbidden as a completion check: it misses `refs/stash`, which carries 2 of the 6 occurrences. Always use `git cat-file --batch-all-objects --batch`.
+- **The leaked string is never written into any file in this repository — including this plan.**
+  An earlier revision of this plan embedded the literal six times and committed it, which
+  (a) republished the credential, (b) invalidated the object-count baseline, and
+  (c) meant `filter-repo` would rewrite this plan's own scan commands into searches for
+  `***REMOVED***`, so every gate would pass vacuously on any repository. Do not reintroduce it.
+
+  Instead, Task 1 Step 0 **derives** the secret from git history into `$SCRATCH/leaked-secret.txt`
+  and every later step loads it at runtime:
+
+  ```bash
+  IFS= read -r SECRET < "$SCRATCH/leaked-secret.txt"
+  ```
+
+  If you find yourself typing the credential into any file under the repo root, stop.
+- **Verification is object-level, never ref-traversal.** `git log -p --all | grep` is forbidden as a completion check: it misses `refs/stash`. Always use `git cat-file --batch-all-objects --batch`.
+- **Object scans must be binary-safe and must assert, not print.** Raw object output contains binary; GNU grep switches to binary mode and reports "Binary file matches" instead of counting. Every scan uses `grep -aF` (`-a` forces text, `-F` fixed-string), runs under `set -euo pipefail`, and ends in an explicit non-zero exit on failure. A step that only prints a number is not a gate.
 - Node version is **20** everywhere it is stated (README, `ci.yml`, `release.yml`). `azure-pipelines-ios.yml` says 18; it is an unimplemented artifact and is not a source of truth.
 - Android toolchain: SDK 35, build-tools 35.0.0, JDK 17.
 - App version is **1.1.6**, matching `config.xml`.
@@ -71,7 +85,9 @@ Neither sibling configures a required status check, so this plan does not either
 
 **Modified in Phase B:** `.gitignore`, `package.json`, `package-lock.json`, `README.md`.
 
-**Untouched throughout:** `config.xml`, `www/`, `hooks/`, `azure-pipelines-ios.yml`, `ios-build-guide.md`, `CLAUDE.md`. No app functionality changes in this plan.
+**Modified in Phase B:** also `CLAUDE.md` — it documents an Azure-hosted repo and must be corrected *before* the push, not after, because the rulesets applied in Task 12 require a PR for subsequent changes.
+
+**Untouched throughout:** `config.xml`, `www/`, `hooks/`, `azure-pipelines-ios.yml`, `ios-build-guide.md`. No app functionality changes in this plan.
 
 ---
 
@@ -87,46 +103,98 @@ Establishes the pre-rewrite baseline and a restore point. Every later claim abou
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `$SCRATCH/print-log-app-backup.git` (restore source for the Task 3 abort path); the baseline counts `TOTAL_OBJECTS_WITH_SECRET=6` and `MAIN_COMMITS=20`
+- Produces: `$SCRATCH/leaked-secret.txt` (the credential, never in the repo); `$SCRATCH/print-log-app-backup.git` (restore source for the Task 3 abort path); `$SCRATCH/baseline-shas.txt` and `$SCRATCH/baseline-authors.txt`; and a **measured** baseline written to `$SCRATCH/pre-migration-inventory.txt` — the counts are computed here, not hardcoded, because committing this plan changed them
 
 - [ ] **Step 1: Confirm the working tree is clean**
 
 ```bash
+set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
-git status --porcelain
+DIRT=$(git status --porcelain | grep -v '^?? old-app-backup/$' || true)
+if [ -n "$DIRT" ]; then
+  echo "REFUSING: unexpected working-tree changes:"; echo "$DIRT"; exit 1
+fi
+echo "working tree clean apart from the ignored APK backup"
 ```
 
-Expected: only `?? old-app-backup/`. If anything else appears, stop and resolve it — `filter-repo` refuses to run on a dirty tree, and uncommitted work would be lost.
+Expected: the confirmation line. `filter-repo` refuses to run on a dirty tree, and uncommitted work would be lost — so this fails loudly rather than printing status for a human to eyeball.
 
-- [ ] **Step 2: Capture the full ref and object inventory**
+- [ ] **Step 0: Derive the credential into the scratchpad**
+
+The credential must never be typed into a file under the repo root. It is already in git history, so derive it instead — this keeps the plan clean and is self-checking, because a failure here means the history is not what we think it is.
 
 ```bash
+set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
 SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
-SECRET='***REMOVED***'
+mkdir -p -- "$SCRATCH"
+case "$SCRATCH" in
+  */scratchpad) : ;;
+  *) echo "REFUSING: SCRATCH does not look like the scratchpad path"; exit 1 ;;
+esac
+
+git log -p --all   | grep -aoE -- '--storePassword=[A-Za-z0-9]+'   | head -1 | cut -d= -f2 > "$SCRATCH/leaked-secret.txt"
+
+IFS= read -r SECRET < "$SCRATCH/leaked-secret.txt"
+[ ${#SECRET} -ge 16 ] || { echo "REFUSING: derived secret implausibly short"; exit 1; }
+echo "derived a ${#SECRET}-character credential into \$SCRATCH/leaked-secret.txt"
+```
+
+Expected: a 20-character credential. The value is never echoed. If nothing is derived, the history no longer matches the spec's Findings — stop and re-investigate rather than proceeding.
+
+- [ ] **Step 2: Capture the measured baseline**
+
+The counts are computed, not hardcoded. Committing this plan and the spec changed the repository, so any number written down earlier is stale by construction.
+
+```bash
+set -euo pipefail
+cd D:/Development/3d-print-log/print-log-app
+SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
+IFS= read -r SECRET < "$SCRATCH/leaked-secret.txt"
+
+# Full commit SHAs and authorship, so the rewrite can be proven to have changed
+# every SHA while preserving every author.
+git rev-list main > "$SCRATCH/baseline-shas.txt"
+git log --format='%an <%ae> %at | %s' main > "$SCRATCH/baseline-authors.txt"
+
+LOG_HITS=$(git log -p --all | grep -acF -- "$SECRET" || true)
+OBJ_HITS=$(git cat-file --batch-all-objects --batch | grep -acF -- "$SECRET" || true)
 
 {
   echo "=== date ==="; date
   echo "=== refs ==="; git for-each-ref --format='%(refname) %(objectname)'
   echo "=== stashes ==="; git stash list
   echo "=== main commit count ==="; git rev-list --count main
-  echo "=== occurrences via log --all (KNOWN INCOMPLETE) ==="
-  git log -p --all | grep -c "$SECRET"
-  echo "=== occurrences via all objects (AUTHORITATIVE) ==="
-  git cat-file --batch-all-objects --batch | grep -c "$SECRET"
+  echo "=== lines matching via log --all (KNOWN INCOMPLETE) ==="; echo "$LOG_HITS"
+  echo "=== lines matching across all objects (AUTHORITATIVE) ==="; echo "$OBJ_HITS"
 } > "$SCRATCH/pre-migration-inventory.txt"
 
 cat "$SCRATCH/pre-migration-inventory.txt"
+
+[ "$OBJ_HITS" -gt 0 ] || { echo "REFUSING: nothing to scrub - repository state unexpected"; exit 1; }
+[ "$OBJ_HITS" -ge "$LOG_HITS" ] || { echo "REFUSING: object scan found fewer hits than ref scan"; exit 1; }
+echo "baseline recorded: log=$LOG_HITS objects=$OBJ_HITS"
 ```
 
-Expected: `main` commit count `20`; log-based count `4`; object-based count `6`. The gap between 4 and 6 is the whole reason this plan exists — if the object count is not greater than the log count, re-read the spec's Findings section before continuing, because the repository state has changed since it was written.
+Note these are counts of *matching lines*, not occurrences — that is fine, because the only value that matters downstream is whether the object count reaches exactly zero.
+
+Expected: object count strictly greater than the log count. That gap is `refs/stash`, and it is the whole reason this plan exists. If the two are equal, the stashes were already cleared; re-read the spec's Findings before continuing.
 
 - [ ] **Step 3: Create the mirror backup**
 
 ```bash
+set -euo pipefail
 SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
-rm -rf "$SCRATCH/print-log-app-backup.git"
-git clone --mirror D:/Development/3d-print-log/print-log-app "$SCRATCH/print-log-app-backup.git"
+BACKUP="$SCRATCH/print-log-app-backup.git"
+
+# Guard the destructive path: never rm -rf an empty or unexpected target.
+case "$BACKUP" in
+  */scratchpad/print-log-app-backup.git) : ;;
+  *) echo "REFUSING to remove unexpected path: $BACKUP"; exit 1 ;;
+esac
+rm -rf -- "$BACKUP"
+
+git clone --mirror D:/Development/3d-print-log/print-log-app "$BACKUP"
 ```
 
 - [ ] **Step 4: Validate the backup before trusting it**
@@ -134,16 +202,45 @@ git clone --mirror D:/Development/3d-print-log/print-log-app "$SCRATCH/print-log
 A backup that has not been verified is not a backup.
 
 ```bash
+set -euo pipefail
 SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
-git -C "$SCRATCH/print-log-app-backup.git" fsck --no-progress
-git -C "$SCRATCH/print-log-app-backup.git" rev-list --count main
+BACKUP="$SCRATCH/print-log-app-backup.git"
+
+git -C "$BACKUP" fsck --no-progress
+
+# Commit count must match the source exactly.
+SRC=$(git -C D:/Development/3d-print-log/print-log-app rev-list --count main)
+BAK=$(git -C "$BACKUP" rev-list --count main)
+[ "$SRC" = "$BAK" ] || { echo "backup commit count $BAK != source $SRC"; exit 1; }
+
+# Every branch and tag must be present, not just main.
+diff <(git -C D:/Development/3d-print-log/print-log-app for-each-ref          --format='%(refname)' refs/heads refs/tags | sort)      <(git -C "$BACKUP" for-each-ref          --format='%(refname)' refs/heads refs/tags | sort)   || { echo "backup ref inventory differs from source"; exit 1; }
+
+echo "backup validated: $BAK commits, ref inventory matches"
 ```
 
-Expected: `fsck` reports no errors (dangling-object notices are fine), and the count is `20`.
+Expected: the confirmation line. `fsck` dangling-object notices are fine; a differing ref inventory is not.
 
-Note: a `--mirror` clone does **not** copy `refs/stash`. That is acceptable — the stashes are 2022 WIP being deliberately discarded, and their content is a superset of what is already in history. If they must be recoverable, run `git stash show -p stash@{0} > $SCRATCH/stash0.patch` (and `stash@{1}`) first, and treat those patch files as secret-bearing.
+- [ ] **Step 5: Preserve the stashes before they are discarded**
 
-- [ ] **Step 5: Commit the inventory record**
+A `--mirror` clone does **not** copy `refs/stash`, so the backup alone would not restore them, and Task 2 deletes them. Export them first. This is mandatory rather than optional: the backup is the abort path, and an abort path that silently loses data is not one.
+
+```bash
+set -euo pipefail
+cd D:/Development/3d-print-log/print-log-app
+SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
+
+N=$(git stash list | wc -l)
+for i in $(seq 0 $((N-1))); do
+  git stash show -p "stash@{$i}" > "$SCRATCH/stash$i.patch"
+done
+ls -l "$SCRATCH"/stash*.patch
+echo "exported $N stash(es)"
+```
+
+Expected: two patch files. **These are secret-bearing** — the stashes are why the object count exceeds the ref count — so they live only in the scratchpad and are deleted with the backup in Task 13 Step 8.
+
+- [ ] **Step 6: Commit the inventory record**
 
 Nothing to commit in the repo — the inventory lives in the scratchpad by design, because it names the secret. Confirm no scratchpad file leaked into the repo:
 
@@ -174,10 +271,13 @@ This branch is unmerged, so deleting it needs a reason on the record, not an ass
 cd D:/Development/3d-print-log/print-log-app
 git log --oneline main..UpdateAndroid13
 git diff --stat main...UpdateAndroid13
-grep -n '"cordova-android"' package.json
+
+# What the branch actually proposes, vs what main already has:
+git show UpdateAndroid13:package.json | grep -n 'cordova-android'
+git show main:package.json          | grep -n 'cordova-android'
 ```
 
-Expected: exactly one unique commit `1cae47d feat: update to android 13 (api 34)`; a diff touching only `package.json` and `package-lock.json`; and current `package.json` showing `cordova-android: ^14.0.1`. That combination is the proof the branch is superseded — it proposes API 34 tooling that `main` has already moved past. If the diff touches any file beyond those two, **stop** and escalate: the branch contains unique work.
+Expected: exactly one unique commit `1cae47d feat: update to android 13 (api 34)`; a diff touching only `package.json` and `package-lock.json`; and the branch's `cordova-android` version strictly older than main's `^14.0.1`. Comparing the two blobs directly — rather than grepping the working-tree file — is what makes this evidence rather than assumption. That combination is the proof the branch is superseded — it proposes API 34 tooling that `main` has already moved past. If the diff touches any file beyond those two, **stop** and escalate: the branch contains unique work.
 
 - [ ] **Step 2: Drop the stashes**
 
@@ -231,26 +331,37 @@ The gate. Nothing in Phase B or C may start until Step 5 passes.
 
 - [ ] **Step 1: Write the replacement file**
 
+The credential is read from the scratchpad, never typed here.
+
 ```bash
+set -euo pipefail
 SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
-printf '%s==>%s\n' '***REMOVED***' '***REMOVED***' > "$SCRATCH/secrets.txt"
-cat "$SCRATCH/secrets.txt"
+IFS= read -r SECRET < "$SCRATCH/leaked-secret.txt"
+printf '%s==>%s
+' "$SECRET" '***REMOVED***' > "$SCRATCH/secrets.txt"
+wc -c < "$SCRATCH/secrets.txt"
 ```
 
-- [ ] **Step 2: Confirm the scrub is currently needed (the failing check)**
+Expected: a non-empty file. Do not `cat` it — that would print the credential to the terminal and into any transcript.
 
-Run the authoritative scan before the rewrite so its post-rewrite counterpart is meaningful:
+- [ ] **Step 2: Confirm the scrub is still needed (the failing check)**
 
 ```bash
+set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
-git cat-file --batch-all-objects --batch | grep -c '***REMOVED***'
+SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
+IFS= read -r SECRET < "$SCRATCH/leaked-secret.txt"
+BEFORE=$(git cat-file --batch-all-objects --batch | grep -acF -- "$SECRET" || true)
+echo "matching lines before rewrite: $BEFORE"
+[ "$BEFORE" -gt 0 ] || { echo "Nothing to scrub - unexpected, investigate"; exit 1; }
 ```
 
-Expected: still `6`, unchanged from Task 1. Clearing the stashes in Task 2 made those two blobs *unreachable*, but `--batch-all-objects` walks the whole object database including unreachable objects, so they are still counted. This is exactly why the ref-based check is inadequate and why Step 4's gc is a required step rather than tidying. Any non-zero value confirms the scrub is still needed.
+Expected: the same value Task 1 measured. Clearing the stashes in Task 2 made two blobs *unreachable*, but `--batch-all-objects` walks the whole object database including unreachable objects, so the count does not drop. This is precisely why the ref-based check is inadequate and why Step 4's gc is required rather than tidying.
 
 - [ ] **Step 3: Run the rewrite**
 
 ```bash
+set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
 SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
 git filter-repo --replace-text "$SCRATCH/secrets.txt" --force
@@ -263,6 +374,7 @@ git filter-repo --replace-text "$SCRATCH/secrets.txt" --force
 The rewrite leaves the old objects reachable via reflog. Until they are pruned, the secret is still in `.git`.
 
 ```bash
+set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
 git reflog expire --expire=now --all
 git gc --prune=now --aggressive
@@ -271,39 +383,78 @@ git gc --prune=now --aggressive
 - [ ] **Step 5: THE GATE — object-level verification**
 
 ```bash
+set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
-git cat-file --batch-all-objects --batch | grep -c '***REMOVED***'
-```
-
-Expected: `0`. (`grep -c` exits non-zero on zero matches; that is success here.)
-
-Then confirm the replacement landed and the history is intact:
-
-```bash
-git log --all -p | grep -c 'REMOVED'          # expect >= 1
-git rev-list --count main                      # expect 20
-git for-each-ref --format='%(refname)'         # expect only main + v1.1.6
-git log --oneline -3
-```
-
-**ABORT CRITERION.** If the object scan returns anything other than 0, stop immediately. Do not create the GitHub repository. Do not push. Restore and re-diagnose:
-
-```bash
 SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
-cd D:/Development/3d-print-log
-mv print-log-app print-log-app-FAILED
-git clone "$SCRATCH/print-log-app-backup.git" print-log-app
+IFS= read -r SECRET < "$SCRATCH/leaked-secret.txt"
+
+if git cat-file --batch-all-objects --batch | grep -aqF -- "$SECRET"; then
+  echo "GATE FAILED: credential still present in the object database"
+  exit 1
+fi
+echo "GATE PASSED: zero occurrences at object level"
 ```
+
+Then prove the rewrite was real and lossless. Every commit SHA must have changed, every author must have survived, and the ref set must be exactly what Task 2 left:
+
+```bash
+set -euo pipefail
+cd D:/Development/3d-print-log/print-log-app
+SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
+
+# Every SHA changed?
+git rev-list main > "$SCRATCH/after-shas.txt"
+if comm -12 <(sort "$SCRATCH/baseline-shas.txt") <(sort "$SCRATCH/after-shas.txt") | grep -q .; then
+  echo "FAILED: some commit SHAs are unchanged - rewrite was partial"; exit 1
+fi
+
+# Commit count preserved?
+[ "$(git rev-list --count main)" = "$(wc -l < "$SCRATCH/baseline-shas.txt")" ]   || { echo "FAILED: commit count changed - history was dropped"; exit 1; }
+
+# Authorship preserved?
+git log --format='%an <%ae> %at | %s' main > "$SCRATCH/after-authors.txt"
+diff "$SCRATCH/baseline-authors.txt" "$SCRATCH/after-authors.txt"   || { echo "FAILED: authorship or commit subjects changed"; exit 1; }
+
+# Ref set exactly as expected?
+[ "$(git for-each-ref --format='%(refname)' | sort | tr '
+' ' ')" = "refs/heads/main refs/tags/v1.1.6 " ]   || { echo "FAILED: unexpected refs present"; git for-each-ref --format='%(refname)'; exit 1; }
+
+echo "rewrite verified: all SHAs changed, authorship and refs intact"
+```
+
+**ABORT CRITERION.** If any check above fails, stop. Do not create the GitHub repository. Do not push. Restore from the validated backup:
+
+```bash
+set -euo pipefail
+SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
+BACKUP="$SCRATCH/print-log-app-backup.git"
+FAILED="D:/Development/3d-print-log/print-log-app-FAILED-$(date +%Y%m%d-%H%M%S)"
+
+git -C "$BACKUP" fsck --no-progress   # never restore from an unvalidated backup
+[ ! -e "$FAILED" ] || { echo "destination exists, pick another"; exit 1; }
+
+cd D:/Development/3d-print-log
+mv print-log-app "$FAILED"
+git clone "$BACKUP" print-log-app
+echo "restored; failed tree preserved at $FAILED for diagnosis"
+```
+
+The timestamped destination avoids the silent nesting that `mv` performs when the target directory already exists.
 
 - [ ] **Step 6: Confirm the tag survived and still predates the workflows**
 
 ```bash
+set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
-git tag -l
-git ls-tree -r --name-only v1.1.6 | grep -c '.github/workflows' || echo "no workflows at tag - correct"
+git rev-parse -q --verify refs/tags/v1.1.6 >/dev/null   || { echo "FAILED: v1.1.6 did not survive the rewrite"; exit 1; }
+
+if git ls-tree -r --name-only v1.1.6 | grep -q '^\.github/workflows/'; then
+  echo "FAILED: tag contains workflow files - pushing it could trigger a release"; exit 1
+fi
+echo "v1.1.6 present and contains no workflows - safe to push"
 ```
 
-Expected: `v1.1.6` present; no workflow files at that tag. This is what makes pushing the tag safe — a tag push resolves its workflow from the pushed ref, and this ref has none.
+This is what makes pushing the tag safe: a tag push resolves its workflow from the pushed ref, and this ref has none. The check distinguishes "no workflows" from "command failed", which a bare `|| echo` would not.
 
 No commit step: `filter-repo` has already rewritten the commits.
 
@@ -410,6 +561,7 @@ downloading an unpinned version via npx."
 
 **Files:**
 - Modify: `README.md` (currently four lines of scratch notes)
+- Modify: `CLAUDE.md` (still describes an Azure-hosted repo)
 
 **Interfaces:**
 - Consumes: the pinned npm scripts from Task 4
@@ -523,16 +675,31 @@ grep -n 'not implemented' README.md
 
 Expected: the old `Add readme!` line is gone; Node 20 and the iOS status are both stated.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Update `CLAUDE.md` for the new home**
+
+`CLAUDE.md` still tells future agents this is an Azure DevOps project. Correct it now, in Phase B — after Task 12 the rulesets require a PR with an approving review for every change to `main`, so a trailing documentation fix becomes disproportionately tedious.
+
+Edit these points:
+
+- The repository is `github.com/HoffmanEngineering/3d-print-log-app`; there is no Azure remote.
+- CI/CD is GitHub Actions: `ci.yml` builds a debug APK on push/PR; `release.yml` builds a signed AAB when a `v*` tag is pushed, gated behind the `production` environment's required reviewer.
+- Cutting a release means pushing a `v*` tag, then approving the pending deployment.
+- `azure-pipelines-ios.yml` and `ios-build-guide.md` are unimplemented design artifacts. iOS has never been built. They are not a source of truth — notably not for the Node version, which is 20.
+- The Cordova CLI is pinned in `devDependencies`; use `npm run build:android`, not a global `cordova`.
+
+Leave the Architecture, Key Files, and Build Notes sections about hooks and camera permissions intact — they are still accurate and hard-won.
+
+- [ ] **Step 4: Commit**
 
 ```bash
 cd D:/Development/3d-print-log/print-log-app
-git add README.md
-git commit -m "docs: write public README
+git add README.md CLAUDE.md
+git commit -m "docs: write public README, update CLAUDE.md for GitHub
 
 Replaces four lines of scratch notes. Documents the toolchain (Node 20,
 SDK 35, build-tools 35.0.0, JDK 17), the hook-based native patching,
-the signing story, and that iOS is designed but unimplemented."
+the signing story, and that iOS is designed but unimplemented. CLAUDE.md
+now describes the GitHub remote and Actions-based CI instead of Azure."
 ```
 
 ---
@@ -845,16 +1012,29 @@ body:
 
 - [ ] **Step 6: Validate the YAML parses**
 
-Malformed issue-template YAML fails silently on GitHub — the template just never appears.
+Reading a file is not parsing it. Parse for real:
 
 ```bash
+set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
-node -e "const y=require('fs').readFileSync('.github/ISSUE_TEMPLATE/bug-report.yml','utf8'); console.log('bug-report lines:', y.split('\n').length)"
-node -e "const y=require('fs').readFileSync('.github/ISSUE_TEMPLATE/feature-request.yml','utf8'); console.log('feature-request lines:', y.split('\n').length)"
+python -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
+python - <<'PY'
+import yaml
+for f in ('.github/ISSUE_TEMPLATE/bug-report.yml',
+          '.github/ISSUE_TEMPLATE/feature-request.yml'):
+    d = yaml.safe_load(open(f, encoding='utf-8'))
+    assert isinstance(d, dict), f
+    assert d.get('name') and d.get('body'), f + ': missing name/body'
+    for item in d['body']:
+        assert 'type' in item, f + ': body item without a type'
+    print(f, 'OK -', len(d['body']), 'fields')
+PY
 ls -R .github
 ```
 
-Expected: both files read cleanly and `.github` contains `CODEOWNERS`, `FUNDING.yml`, `pull_request_template.md`, and the two templates. (Full schema validation happens on GitHub in Task 12.)
+Expected: both files report OK with their field counts, and `.github` contains `CODEOWNERS`, `FUNDING.yml`, `pull_request_template.md`, and the two templates.
+
+Malformed issue-template YAML fails *silently* on GitHub — the template simply never appears in the picker — so a parse error caught here saves a confusing debugging session later. Full schema validation still happens server-side; Task 12 Step 7 confirms it via the Community Standards page.
 
 - [ ] **Step 7: Commit**
 
@@ -1111,10 +1291,16 @@ The last gate before anything becomes public. Proves the Task 4 metadata edits d
 - Consumes: everything from Tasks 4–9
 - Produces: a green light for Phase C
 
-- [ ] **Step 1: Build**
+- [ ] **Step 1: Build from a clean state**
+
+A build over a stale `platforms/` or `node_modules/` can succeed on artifacts CI will not have. Remove both so this mirrors a fresh clone, which is what the runner does.
 
 ```bash
+set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
+rm -rf platforms plugins node_modules
+npm ci
+npx cordova platform add android@14.0.1
 npm run build:android
 ```
 
@@ -1122,29 +1308,32 @@ Expected: `BUILD SUCCESSFUL`. If it fails on SDK or build-tools, confirm build-t
 
 - [ ] **Step 2: Re-run the full pre-push checklist**
 
+Every check asserts and exits non-zero. A checklist that only prints values is not a gate — it relies on a human reading twenty lines correctly at the exact moment they are keen to ship.
+
 ```bash
+set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
+SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
+IFS= read -r SECRET < "$SCRATCH/leaked-secret.txt"
+fail() { echo "PRE-PUSH CHECK FAILED: $1"; exit 1; }
 
-echo "--- object-level secret scan (must be 0) ---"
-git cat-file --batch-all-objects --batch | grep -c '***REMOVED***'
+git cat-file --batch-all-objects --batch | grep -aqF -- "$SECRET"   && fail "credential still present at object level"
 
-echo "--- refs (expect main + v1.1.6 only) ---"
-git for-each-ref --format='%(refname)'
+[ "$(git for-each-ref --format='%(refname)' | sort | tr '
+' ' ')" = "refs/heads/main refs/tags/v1.1.6 " ]   || fail "unexpected refs"
 
-echo "--- stashes (expect empty) ---"
-git stash list
+[ -z "$(git stash list)" ] || fail "stashes present"
 
-echo "--- no signing material tracked (expect no output) ---"
-git ls-files | grep -E 'build\.json|\.jks$|\.p12$|\.keystore$'
+git ls-files | grep -qE 'build\.json|\.jks$|\.p12$|\.keystore$'   && fail "signing material is tracked"
 
-echo "--- APK backup not tracked (expect no output) ---"
-git ls-files | grep old-app-backup
+git ls-files | grep -q old-app-backup && fail "APK backup is tracked"
 
-echo "--- working tree clean ---"
-git status --porcelain
+[ -z "$(git status --porcelain | grep -v '^?? old-app-backup/$' || true)" ]   || fail "working tree dirty"
+
+echo "ALL PRE-PUSH CHECKS PASSED"
 ```
 
-Every line must match its stated expectation. **If the secret scan is not 0, stop** and follow the abort path in Task 3 Step 5.
+Expected: `ALL PRE-PUSH CHECKS PASSED` and nothing else. **On any failure, stop** and follow the abort path in Task 3 Step 5.
 
 - [ ] **Step 3: Record the current keystore fingerprint**
 
@@ -1177,11 +1366,18 @@ This task changes nothing. Confirm with `git status --porcelain` (already done i
 - [ ] **Step 1: Confirm the gate one final time**
 
 ```bash
+set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
-git cat-file --batch-all-objects --batch | grep -c '***REMOVED***'
+SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
+IFS= read -r SECRET < "$SCRATCH/leaked-secret.txt"
+
+if git cat-file --batch-all-objects --batch | grep -aqF -- "$SECRET"; then
+  echo "STOP: credential present. Do not push."; exit 1
+fi
+echo "clean - safe to publish"
 ```
 
-Expected: `0`. This is the point of no return — after the push, the history is public and cannot be recalled.
+Expected: `clean - safe to publish`. This is the point of no return — after the push, the history is public and cannot be recalled.
 
 - [ ] **Step 2: Confirm `gh` is authenticated with the right account and scopes**
 
@@ -1220,18 +1416,53 @@ git push origin v1.1.6
 gh repo view HoffmanEngineering/3d-print-log-app --json name,visibility,url
 gh api repos/HoffmanEngineering/3d-print-log-app/branches --jq '.[].name'
 gh api repos/HoffmanEngineering/3d-print-log-app/tags --jq '.[].name'
-gh run list --repo HoffmanEngineering/3d-print-log-app --limit 5
 ```
 
-Expected: public repo; only `main`; tag `v1.1.6`; and in the run list, a `CI` run from the branch push but **no `Release` run** from the tag. A Release run appearing here means the tag was not rewritten as expected — cancel it immediately with `gh run cancel` and investigate.
+Then confirm no release run appears for the tag. Poll rather than checking once — GitHub registers runs asynchronously, so an immediate check can miss one that is about to start:
 
-- [ ] **Step 6: Confirm GitHub's own secret scanning is clean**
+```bash
+set -euo pipefail
+for i in $(seq 1 6); do
+  RELRUNS=$(gh run list --repo HoffmanEngineering/3d-print-log-app               --workflow=release.yml --limit 5 --json databaseId --jq 'length')
+  [ "$RELRUNS" = "0" ] || { echo "UNEXPECTED release run - cancel and investigate"; exit 1; }
+  sleep 10
+done
+echo "no release run triggered by the tag, as intended"
+```
+
+Expected: public repo; only `main`; tag `v1.1.6`; a `CI` run from the branch push; and no `Release` run.
+
+- [ ] **Step 6: Inspect the published tree for signing material**
+
+Local `git ls-files` proves what was committed. This proves what is actually readable on GitHub, which is now the thing that matters.
+
+```bash
+set -euo pipefail
+gh api repos/HoffmanEngineering/3d-print-log-app/git/trees/main?recursive=1   --jq '.tree[].path' > /tmp/gh-tree.txt
+wc -l < /tmp/gh-tree.txt
+if grep -qE 'build[.]json|[.]jks$|[.]p12$|[.]keystore$|old-app-backup' /tmp/gh-tree.txt; then
+  echo "STOP: signing material or APK backup is public"; exit 1
+fi
+echo "published tree is clean"
+```
+
+- [ ] **Step 7: Confirm GitHub's own secret scanning is clean**
 
 ```bash
 gh api repos/HoffmanEngineering/3d-print-log-app/secret-scanning/alerts --jq 'length'
 ```
 
-Expected: `0`. A non-empty result means something was missed — treat as an incident, make the repo private with `gh repo edit --visibility private`, and re-diagnose.
+Expected: `0`.
+
+Alerts populate asynchronously, so zero here is reassuring rather than conclusive — re-check after a few minutes. The Task 10 object-level gate remains the real guarantee.
+
+A non-empty result is an incident. Make the repository private immediately; current `gh` requires an explicit consequences flag, written out here so it can be pasted under pressure:
+
+```bash
+gh repo edit HoffmanEngineering/3d-print-log-app   --visibility private --accept-visibility-change-consequences
+```
+
+Then re-diagnose from the Task 3 abort path.
 
 ---
 
@@ -1249,7 +1480,7 @@ Values verified against `3d-print-log-ui` and `3d-print-log-api` during planning
 
 ```bash
 gh api -X PATCH repos/HoffmanEngineering/3d-print-log-app \
-  -f has_issues=true \
+  -F has_issues=true \
   -F has_wiki=false \
   -F has_projects=true \
   -F allow_squash_merge=true \
@@ -1322,16 +1553,19 @@ This step cannot be automated: it requires the keystore file and its passwords, 
 
 ```bash
 # From a directory containing the keystore. Base64 with no line wrapping:
-base64 -w0 D:/Development/3d-print-log/AndroidKeyStore/3DPrintLogKeyStore.jks > keystore.b64
+set -euo pipefail
+# Private temp file, removed even if a later command fails.
+B64=$(mktemp); trap 'rm -f -- "$B64"' EXIT
+base64 -w0 D:/Development/3d-print-log/AndroidKeyStore/3DPrintLogKeyStore.jks > "$B64"
 
 gh secret set ANDROID_KEYSTORE_BASE64 --env production \
-  --repo HoffmanEngineering/3d-print-log-app < keystore.b64
+  --repo HoffmanEngineering/3d-print-log-app < "$B64"
 gh secret set ANDROID_KEYSTORE_PASSWORD --env production --repo HoffmanEngineering/3d-print-log-app
 gh secret set ANDROID_KEY_ALIAS        --env production --repo HoffmanEngineering/3d-print-log-app
 gh secret set ANDROID_KEY_PASSWORD     --env production --repo HoffmanEngineering/3d-print-log-app
-
-rm keystore.b64   # do not leave this lying around
 ```
+
+The `trap` removes the base64 file on exit including on failure — a trailing `rm` is skipped exactly when a command errors out and the file is most likely to be forgotten.
 
 The alias is `HoffmanUpload`; the two passwords are the `storePassword` and `password` values from the local `build.json`. `base64 -w0` matters — wrapped base64 fails to decode in the workflow.
 
@@ -1346,7 +1580,11 @@ Expected: all four names present.
 - [ ] **Step 5: Confirm CI has run at least once**
 
 ```bash
+set -euo pipefail
 gh run list --repo HoffmanEngineering/3d-print-log-app --workflow=ci.yml --limit 3
+CONC=$(gh run list --repo HoffmanEngineering/3d-print-log-app --workflow=ci.yml         --limit 1 --json conclusion --jq '.[0].conclusion')
+echo "latest CI conclusion: $CONC"
+[ "$CONC" = "success" ] || { echo "CI is not green - fix before applying rulesets"; exit 1; }
 ```
 
 Expected: at least one completed run, ideally `success`.
@@ -1465,12 +1703,21 @@ git tag v1.1.7-rc1
 git push origin v1.1.7-rc1
 ```
 
+The `All Tags` ruleset blocks tag creation for non-admins; this succeeds via the admin bypass configured in Task 12 Step 6. A rejection here means that bypass actor is missing.
+
 - [ ] **Step 2: Approve the pending deployment**
 
 The `production` environment has a required reviewer (Task 12 Step 3), so the run does **not** start executing — it sits at "Waiting" until approved. This is expected, not a hang.
 
 ```bash
-RUN_ID=$(gh run list --repo HoffmanEngineering/3d-print-log-app --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+# Select the run belonging to THIS tag, and wait for GitHub to register it.
+RUN_ID=""
+for i in $(seq 1 12); do
+  RUN_ID=$(gh run list --repo HoffmanEngineering/3d-print-log-app             --workflow=release.yml --branch v1.1.7-rc1 --limit 1             --json databaseId --jq '.[0].databaseId // empty')
+  [ -n "$RUN_ID" ] && break
+  sleep 10
+done
+[ -n "$RUN_ID" ] || { echo "no release run registered for v1.1.7-rc1"; exit 1; }
 echo "Run: $RUN_ID"
 gh api repos/HoffmanEngineering/3d-print-log-app/actions/runs/$RUN_ID/pending_deployments \
   --jq '.[] | {env:.environment.name, waiting:.current_user_can_approve}'
@@ -1507,9 +1754,15 @@ Common first-run failures and their causes:
 - [ ] **Step 4: Verify the published artifact is signed with the expected key**
 
 ```bash
-gh release download v1.1.7-rc1 --repo HoffmanEngineering/3d-print-log-app --pattern '*.aab' --dir /tmp/relcheck
-ls -la /tmp/relcheck
-keytool -printcert -jarfile /tmp/relcheck/*.aab | grep -A2 'SHA256:'
+set -euo pipefail
+RELDIR=$(mktemp -d); trap 'rm -rf -- "$RELDIR"' EXIT
+gh release download v1.1.7-rc1 --repo HoffmanEngineering/3d-print-log-app   --pattern '*.aab' --dir "$RELDIR"
+
+# Require exactly one artifact, so a stale or duplicate file cannot be checked by accident.
+COUNT=$(ls -1 "$RELDIR"/*.aab | wc -l)
+[ "$COUNT" = "1" ] || { echo "expected exactly one .aab, found $COUNT"; exit 1; }
+
+keytool -printcert -jarfile "$RELDIR"/*.aab | grep -A2 'SHA256:'
 ```
 
 Expected: the SHA-256 fingerprint matches the one recorded in Task 10 Step 3. **A mismatch means the CI-signed artifact would be rejected by Play Store** — investigate before shipping any real release.
@@ -1517,48 +1770,57 @@ Expected: the SHA-256 fingerprint matches the one recorded in Task 10 Step 3. **
 - [ ] **Step 5: Delete the test release and tag**
 
 ```bash
+set -euo pipefail
 gh release delete v1.1.7-rc1 --repo HoffmanEngineering/3d-print-log-app --yes --cleanup-tag
-git tag -d v1.1.7-rc1
-rm -rf /tmp/relcheck
+git tag -d v1.1.7-rc1 || true
+
+# --cleanup-tag can be blocked by the tag ruleset's deletion rule; verify the
+# remote tag is actually gone rather than trusting the release listing.
 gh release list --repo HoffmanEngineering/3d-print-log-app
+if git ls-remote --tags origin | grep -q 'refs/tags/v1.1.7-rc1'; then
+  echo "remote tag survived - deleting explicitly"
+  git push origin :refs/tags/v1.1.7-rc1
+fi
+git ls-remote --tags origin | grep -q 'refs/tags/v1.1.7-rc1'   && { echo "FAILED: remote test tag still present"; exit 1; }
+echo "test release and tag removed"
 ```
 
-Expected: no `v1.1.7-rc1` release or tag remaining.
+Expected: `v1.1.6` remains the only tag; no `v1.1.7-rc1` release or tag anywhere.
 
-- [ ] **Step 6: Delete the secret-bearing backup**
+- [ ] **Step 6: USER ACTION — confirm the Play Store upload key matches**
 
-The mirror backup deliberately retains the leaked credential and must not outlive the migration.
+Task 4 compared the CI artifact against the *local* keystore. That proves CI signs with the key on this machine; it does not prove that key is the one Google Play expects. Only the Play Console can confirm the second half.
 
-```bash
-SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
-rm -rf "$SCRATCH/print-log-app-backup.git"
-rm -f "$SCRATCH/secrets.txt" "$SCRATCH/pre-migration-inventory.txt"
-rm -f "$SCRATCH"/stash*.patch
-ls "$SCRATCH"
-```
+In Play Console → your app → **Test and release → Setup → App integrity → App signing**, compare the **upload key certificate** SHA-256 fingerprint with the one recorded in Task 10 Step 3 and reconfirmed in Step 4 above.
 
-Only do this once Steps 1–5 have passed. Until then, the backup is the restore path.
+A mismatch means a real release built by this workflow would be rejected on upload. Resolve it before cutting a real version. This is also the corroboration the spec asks for that the leaked, retired keystore is unrelated to current Play trust.
 
-- [ ] **Step 7: Update `CLAUDE.md`**
-
-The project instructions still describe an Azure-hosted repo. Update the Build Notes and iOS sections to say: the repository is at `github.com/HoffmanEngineering/3d-print-log-app`; CI is GitHub Actions (`ci.yml`, `release.yml`); releases are cut by pushing a `v*` tag; and `azure-pipelines-ios.yml` plus `ios-build-guide.md` are unimplemented design artifacts.
-
-```bash
-cd D:/Development/3d-print-log/print-log-app
-git add CLAUDE.md
-git commit -m "docs: update CLAUDE.md for GitHub migration"
-git push origin main
-```
-
-- [ ] **Step 8: USER ACTION — archive the Azure DevOps repository**
+- [ ] **Step 7: USER ACTION — archive the Azure DevOps repository**
 
 Left to the user by design. Until it is archived it remains the only record of the Azure PR discussions and work-item links, which this migration explicitly does not carry over. Retrieve anything wanted from there first, then archive rather than delete.
 
----
+- [ ] **Step 8: Delete the secret-bearing backup**
+
+**Last step in the migration, deliberately.** The mirror backup retains the leaked credential and must not outlive the migration — but it is also the only restore path, so it is deleted only after every mutation and verification above has succeeded.
+
+```bash
+set -euo pipefail
+SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
+case "$SCRATCH" in
+  */scratchpad) : ;;
+  *) echo "REFUSING: unexpected scratch path"; exit 1 ;;
+esac
+rm -rf -- "$SCRATCH/print-log-app-backup.git"
+rm -f  -- "$SCRATCH/secrets.txt" "$SCRATCH/leaked-secret.txt"           "$SCRATCH/pre-migration-inventory.txt"           "$SCRATCH/baseline-shas.txt" "$SCRATCH/after-shas.txt"           "$SCRATCH/baseline-authors.txt" "$SCRATCH/after-authors.txt"
+rm -f  -- "$SCRATCH"/stash*.patch
+ls -A "$SCRATCH" || true
+```
+
+Confirm nothing secret-bearing remains. Do not run this until Steps 1–7 have all passed.
 
 ## Post-migration state
 
-- `github.com/HoffmanEngineering/3d-print-log-app` public, with `main` (20 commits, scrubbed) and tag `v1.1.6`
+- `github.com/HoffmanEngineering/3d-print-log-app` public, with `main` (the 20 scrubbed historical commits plus the Phase B migration commits) and tag `v1.1.6`
 - Zero occurrences of the leaked credential at object level; GitHub secret scanning clean
 - CI green on every push and PR, producing a sideloadable debug APK
 - A signed-AAB release path proven end-to-end against the real Play Store upload key
