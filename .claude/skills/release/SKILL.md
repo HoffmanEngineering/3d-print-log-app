@@ -117,12 +117,26 @@ gh pr create --base main --title "chore: release vNEW" \
   --body "Version bump to vNEW (versionCode NEWCODE). Tag is pushed after merge."
 ```
 
-Wait for CI to pass on the PR, then merge. The bypass lets the maintainer merge
-without a second approver:
+Wait for CI (`build`) to pass on the PR, then merge.
+
+**The merge needs an explicit admin override.** The ruleset requires one
+approving review, and GitHub does not permit approving your own PR. A plain
+`gh pr merge` fails with *"the base branch policy prohibits the merge"*. The
+`bypass_mode: pull_request` bypass does not waive the requirement silently — it
+permits an override, which must be asked for:
 
 ```bash
-gh pr merge --squash --delete-branch
+gh pr merge --squash --delete-branch --admin
 ```
+
+**Do not run this on the user's behalf without asking.** It overrides branch
+protection, and the point of the protection is that a human decides each time.
+Give the user the PR URL and let them merge — in the browser via "Merge without
+waiting for requirements", or with the command above if they prefer. Wait for
+them to confirm the merge landed before tagging.
+
+If a second maintainer ever joins, this override disappears: a real approval
+satisfies the rule and `gh pr merge` works normally.
 
 ### 6. Tag the merged commit
 
