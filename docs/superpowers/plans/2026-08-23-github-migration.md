@@ -337,7 +337,7 @@ The gate. Nothing in Phase B or C may start until Step 5 passes.
 
 **Interfaces:**
 - Consumes: cleaned refs from Task 2
-- Produces: a rewritten history with zero secret occurrences at object level; all commit SHAs changed
+- Produces: a rewritten history with zero secret occurrences at object level; every commit that ever held the credential replaced by a new SHA (commits predating its introduction legitimately keep theirs)
 
 - [ ] **Step 1: Write the replacement file**
 
@@ -412,11 +412,21 @@ set -euo pipefail
 cd D:/Development/3d-print-log/print-log-app
 SCRATCH="C:/Users/CHRIST~1/AppData/Local/Temp/claude/D--Development-3d-print-log-print-log-app/c737cb7f-e6a5-40c7-a46f-855a356db7b2/scratchpad"
 
-# Every SHA changed?
+# Every commit that EVER held the credential must be gone.
+#
+# NOT "every SHA changed" — filter-repo correctly leaves a commit untouched when
+# neither its content nor any ancestor changed, so commits predating the
+# credential's introduction keep their original SHA. Asserting otherwise fails on
+# a perfectly good rewrite.
 git rev-list main > "$SCRATCH/after-shas.txt"
-if comm -12 <(sort "$SCRATCH/baseline-shas.txt") <(sort "$SCRATCH/after-shas.txt") | grep -q .; then
-  echo "FAILED: some commit SHAs are unchanged - rewrite was partial"; exit 1
-fi
+: > "$SCRATCH/tainted.txt"
+while read -r sha; do
+  git -C "$SCRATCH/print-log-app-backup.git" grep -qF -- "$SECRET" "$sha" 2>/dev/null     && echo "$sha" >> "$SCRATCH/tainted.txt"
+done < <(git -C "$SCRATCH/print-log-app-backup.git" rev-list --all)
+
+SURVIVORS=$(comm -12 <(sort -u "$SCRATCH/tainted.txt") <(sort "$SCRATCH/after-shas.txt") | wc -l)
+[ "$SURVIVORS" = "0" ] || { echo "FAILED: $SURVIVORS tainted commits survived the rewrite"; exit 1; }
+echo "OK: none of the $(sort -u "$SCRATCH/tainted.txt" | wc -l) tainted commits survived"
 
 # Commit count preserved?
 [ "$(git rev-list --count main)" = "$(wc -l < "$SCRATCH/baseline-shas.txt")" ]   || { echo "FAILED: commit count changed - history was dropped"; exit 1; }

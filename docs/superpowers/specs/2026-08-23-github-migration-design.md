@@ -136,8 +136,12 @@ the workflows are added regardless, as belt and braces.
 `filter-repo` removes the `origin` remote as a safety measure. This is desirable
 here since the Azure remote is being dropped regardless.
 
-All commit SHAs change. Any existing clone of the Azure repo becomes
-incompatible; since the Azure repo is being retired, this is acceptable.
+Every commit from the credential's introduction onward gets a new SHA. Commits
+predating it keep theirs, which is correct — `filter-repo` rewrites a commit only
+when its content or an ancestor changed. The verification therefore asserts that
+no *tainted* commit survives, not that every SHA changed; the latter fails on a
+perfectly good rewrite. Any existing clone of the Azure repo becomes
+incompatible regardless; since that repo is being retired, this is acceptable.
 
 **Abort criterion.** If step 8 finds any occurrence of the leaked string, stop.
 Do not create the GitHub repository and do not push. Restore from the mirror
