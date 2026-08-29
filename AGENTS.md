@@ -110,6 +110,118 @@ tag be pushed.
 - Android build tools 36.0.0 is required (cordova-android 15.1.0 targets SDK 36)
 - The `patch_back_navigation.js` hook makes API 36 predictive-back gestures navigate WebView history before exiting; `www/js/index.js` uses `location.replace()` so the local bootstrap page is not retained in that history.
 - All Android-specific hooks (`patch_camera_permission.js`, `patch_auth_custom_tab.js`, `patch_back_navigation.js`) have platform guards that skip when not building for Android
+- `OverrideUserAgent` in `config.xml` is load-bearing: the UI's `isCordova`
+  (`src/app/core/utils/platform.ts`) compares `navigator.userAgent` for exact equality with
+  it. Changing the version in that string without the matching UI change silently disables
+  every Cordova-specific behavior in the shipped app, including push registration.
+  `scripts/check-user-agent-contract.mjs` checks both repos in CI, and reads the UI's actual
+  `CORDOVA_USER_AGENT` constant rather than a hardcoded copy. Run it locally with
+  `PRINT_LOG_UI_PATH=../3d-print-log-ui npm run check:user-agent`.
+- **CI checks the UI repo out as a SIBLING of this one, never inside it.** `ci.yml` needs
+  `print-log-ui` so `check:user-agent` can read the UI's real `CORDOVA_USER_AGENT`. This
+  repo is therefore checked out into `app/`, the job sets
+  `defaults.run.working-directory: app`, and the UI lands next to it at the workspace root
+  (`PRINT_LOG_UI_PATH: ../print-log-ui`).
+
+  It used to be checked out *into* the workspace root alongside our own files, which meant
+  anything walking the working directory swept it up. A bare `node --test` recursed from the
+  repo root and collected the UI's test files as well as ours, running them with the wrong
+  cwd. That was invisible until the UI added a test that opens a file by relative path, at
+  which point every app PR failed with an ENOENT naming a UI component template — an error
+  belonging to neither this repo nor this branch. Keep the two trees separate: two
+  `actions/checkout` steps writing into the same tree is the bug, not the symptom.
+
+  Note `path:` on `upload-artifact` is relative to the workspace, not to
+  `defaults.working-directory`, because it is an action input rather than a run step.
+
+- **`npm test` targets its own suite: `node --test test/*.test.js`.** Defense in depth
+  behind the layout above, and correct in its own right — the script should run this repo's
+  tests, not whatever happens to be under the cwd. **Leave the glob unquoted.** CI runs
+  Node 20, which takes only file and directory paths; a quoted pattern arrives as a literal
+  path it cannot find. Unquoted, the runner's bash expands it first. On Windows npm uses
+  cmd, which does not expand it, but local Node is 22 and expands the pattern itself. A bare
+  directory argument (`--test test`) is not portable either: Node 22 tries to load it as a
+  module.
+
+- **Editing `plugins-local/` alone changes nothing you build.** That tree is the source of
+  truth only at `cordova plugin add` time. A plain `cordova build android` compiles the
+  *copies*, so an edit there produces a byte-identical APK and any conclusion drawn from
+  testing it is void. After editing a local plugin, propagate to every copy:
+
+  | Edited file | Also update |
+  | --- | --- |
+  | `src/android/*.java` | `platforms/android/app/src/main/java/com/hoffmanengineering/printlog/` **and** `plugins/cordova-plugin-printlog-native/src/android/` |
+  | `www/printlog-native.js` | `platforms/android/app/src/main/assets/www/`, `platforms/android/platform_www/`, **and** `plugins/cordova-plugin-printlog-native/www/` |
+
+  The shim is loaded as an Android **asset** (`SHIM_ASSET = "www/printlog-native.js"`), not
+  as a Cordova js-module, which is why it has its own separate copies. Re-adding the plugin
+  (`cordova plugin remove`/`add`) also works. Verify before trusting a device test — the APK
+  is the only thing that counts:
+
+  ```bash
+  apk=platforms/android/app/build/outputs/apk/debug/app-debug.apk
+  unzip -p $apk assets/www/printlog-native.js | grep -c <your new symbol>
+  for d in $(unzip -l $apk | grep -oE "classes[0-9]*\.dex"); do
+      unzip -p $apk $d | grep -ac <your new symbol>; done
+  ```
+
+- **Notification taps arrive on two different paths, and only one of them sets `tap`.** The
+  API sends messages carrying an FCM `notification` block, so whenever the app is
+  backgrounded or not running the **system tray** handles them: `onMessageReceived` never
+  fires, the SDK posts the card itself, and the tap launches `MainActivity` with the `data`
+  map as raw intent extras. firebasex's `OnNotificationReceiverActivity` — the only thing
+  that adds a `"tap"` extra — runs on the foreground path only.
+  `PrintLogNativePlugin.capturePendingTap` therefore keys off **`notificationId`**, which
+  both paths carry. Do not reintroduce a `"tap"` check; it silently drops every tray tap,
+  which is the common case for a print finishing while the phone is in a pocket.
+
+- **There is no `resume` event on the remote origin.** `cordova.js` is loaded only by the
+  local bootstrap `www/index.html`; once the WebView navigates to `https://www.3dprintlog.com`
+  it is gone, so `document.addEventListener('resume', ...)` in the Angular app never fires.
+  A tap that arrives while the page is already loaded is delivered by native calling
+  `window.PrintLogNative.signalPendingTap()`, which the UI subscribes to via
+  `NativeBridgeService.onPendingTap`. The same trap applies to any other Cordova-JS API
+  reached from page script — see `docs/superpowers/notes/2026-08-28-firebasex-receiver-contract.md`.
+
+- `google-services.json` is **required for the Android build** — without it Gradle fails at
+  `:app:processDebugGoogleServices`. It is gitignored and injected in CI from the
+  `GOOGLE_SERVICES_JSON_BASE64` secret (repository secret for `ci.yml`, `production`
+  environment for `release.yml`), exactly the way `build.json` is. For a local build, put
+  the real file from the Firebase console at the project root. Full setup, both the client
+  file and the API's service account key: `docs/firebase-setup.md`.
+- `PrintLogApiUrl` in `config.xml` is the API base URL the native bridge posts device
+  registrations to — `https://api.3dprintlog.com`. It is read from config rather than
+  supplied by the page on purpose: a page-supplied API base would let compromised page
+  script send the user's bearer token to a server of its choosing. If it is ever empty or
+  still a placeholder, `cordova-plugin-printlog-native` logs a warning and every
+  registration returns `ok:false` — push is off rather than pointed somewhere wrong.
+
+## Push Notifications
+
+`plugins-local/cordova-plugin-printlog-native` bridges the remotely-loaded Angular app to
+native push. It exists because `cordova.js` is gone once the WebView navigates to
+`https://www.3dprintlog.com`, so the page cannot call plugins the normal way.
+`WebViewCompat.addWebMessageListener` restores a channel and — unlike
+`addJavascriptInterface` — takes an explicit origin allowlist, which matters because
+`config.xml` also permits Auth0 and Google.
+
+Two things are counter-intuitive and were established by reading the firebasex source:
+
+- **The plugin already posts foreground notifications for us.** Its `showNotification` test
+  includes `!hasNotificationsCallback()`, and this app can never register that JS callback,
+  so it posts every notification itself — on the `channel_id` the API sets. Posting one
+  ourselves would double every notification.
+- **`FirebasePluginMessageReceiver.sendMessage(Bundle)` never fires here**, for the same
+  reason: its only caller returns early when there is no JS callback. Notification taps are
+  therefore captured from the main activity's intent extras instead — `pluginInitialize()`
+  for a cold start, `onNewIntent()` for a warm one.
+
+The FCM token is never exposed to page script. The page hands native its bearer token and
+native performs the `/api/devices` call.
+
+Firebase credentials — the client `google-services.json` and the API's service account key,
+which are different credentials with different handling — are covered in
+`docs/firebase-setup.md`.
 
 ## iOS Build Notes
 

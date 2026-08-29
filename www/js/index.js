@@ -24,7 +24,27 @@ document.addEventListener("deviceready", onDeviceReady, false);
 function onDeviceReady() {
   if (navigator.connection.type == Connection.NONE) {
     navigator.notification.alert("An internet connection is required to continue");
-  } else {
-    window.location.replace("https://www.3dprintlog.com");
+    return;
   }
+
+  setupPushChannel();
+  window.location.replace("https://www.3dprintlog.com");
+}
+
+// Android groups notifications by channel, and the channel is what a user mutes in system
+// settings. Every message the API sends targets print_status; without the channel existing
+// first those messages land in the default channel and per-category muting silently stops
+// working. Created here, on the local page, because cordova.js is gone after navigation.
+//
+// The plugin's JS module clobbers the global FirebasexMessaging (see its plugin.xml).
+function setupPushChannel() {
+  if (typeof FirebasexMessaging === "undefined") {
+    return;
+  }
+
+  FirebasexMessaging.createChannel({
+    id: "print_status",
+    name: "Print status",
+    importance: 4
+  });
 }

@@ -10,6 +10,12 @@ node_modules/
 # Signing config (contains keystore passwords)
 build.json
 
+# Firebase Android config. Not a secret in the credential sense, but it identifies the
+# Firebase project, so it is injected in CI from GOOGLE_SERVICES_JSON_BASE64 exactly the
+# way build.json is - see .github/workflows and AGENTS.md. Without it the Android build
+# fails at :app:processDebugGoogleServices.
+google-services.json
+
 # Git worktrees
 .worktrees/
 

@@ -1,0 +1,17 @@
+{
+  "name": "cordova-plugin-printlog-native",
+  "version": "1.0.0",
+  "description": "Origin-restricted native bridge for push registration and notification taps.",
+  "cordova": {
+    "id": "cordova-plugin-printlog-native",
+    "platforms": [
+      "android"
+    ]
+  },
+  "keywords": [
+    "ecosystem:cordova",
+    "cordova-android"
+  ],
+  "author": "Hoffman Engineering",
+  "license": "AGPL-3.0-only"
+}

@@ -5,7 +5,8 @@
   "description": "Cordova hybrid mobile app for 3D Print Log — log and track your 3D prints, print times, filament usage, and settings.",
   "main": "index.js",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
+    "check:user-agent": "node scripts/check-user-agent-contract.mjs",
     "build:android": "cordova build android",
     "release:android": "cordova build android --prod --release --buildConfig=build.json",
     "build:ios": "cordova build ios",
@@ -26,7 +27,9 @@
     "cordova-ios": "^7.1.1",
     "cordova-plugin-customurlscheme": "^5.0.2",
     "cordova-plugin-dialogs": "^2.0.2",
-    "cordova-plugin-network-information": "^3.0.0"
+    "cordova-plugin-firebasex-messaging": "^2.0.3",
+    "cordova-plugin-network-information": "^3.0.0",
+    "cordova-plugin-printlog-native": "file:plugins-local/cordova-plugin-printlog-native"
   },
   "cordova": {
     "plugins": {
@@ -37,7 +40,9 @@
         "ANDROID_PATHPREFIX": "/cordova/com.hoffmanengineering.printlog/callback",
         "ANDROID_SCHEME": " ",
         "ANDROID_HOST": " "
-      }
+      },
+      "cordova-plugin-firebasex-messaging": {},
+      "cordova-plugin-printlog-native": {}
     },
     "platforms": [
       "ios",

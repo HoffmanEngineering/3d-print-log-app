@@ -23,14 +23,25 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    # This repo is checked out into app/ so the UI checkout below can be its SIBLING rather
+    # than living inside our tree. Anything that walks the working directory - `node --test`
+    # discovering test files, a glob in a build script - would otherwise pick the UI repo up
+    # as if it were ours, and run it with the wrong working directory.
+    defaults:
+      run:
+        working-directory: app
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: app
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: app/package-lock.json
 
       - name: Setup JDK
         uses: actions/setup-java@v4
@@ -38,8 +49,32 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # A sibling of app/, never inside it. See the defaults block above.
+      - name: Check out the UI repo for the user-agent contract
+        uses: actions/checkout@v4
+        with:
+          repository: HoffmanEngineering/3d-print-log-ui
+          path: print-log-ui
+
       - name: Install dependencies
         run: npm ci
+
+      # config.xml's OverrideUserAgent and the UI's CORDOVA_USER_AGENT must stay identical.
+      # Drift disables every Cordova-only behavior in the shipped app - push registration
+      # included - and nothing errors, so only this check catches it.
+      - name: Verify the user agent contract
+        env:
+          PRINT_LOG_UI_PATH: ../print-log-ui
+        run: node scripts/check-user-agent-contract.mjs
+
+      - name: Run hook and contract tests
+        run: npm test
+
+      # The Android build fails at :app:processDebugGoogleServices without this. It is
+      # Firebase client config rather than a credential, but it identifies the project, so
+      # it is injected the same way build.json is rather than committed.
+      - name: Write google-services.json
+        run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > google-services.json
 
       - name: Add Android platform
         run: npx cordova platform add android@15.1.0
@@ -51,6 +86,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
-          path: platforms/android/app/build/outputs/apk/debug/*.apk
+          # Relative to the workspace, not to defaults.working-directory: this is an
+          # action input rather than a run step.
+          path: app/platforms/android/app/build/outputs/apk/debug/*.apk
           retention-days: 14
           if-no-files-found: error
