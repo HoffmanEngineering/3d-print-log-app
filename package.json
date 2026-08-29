@@ -27,7 +27,8 @@
     "cordova-plugin-customurlscheme": "^5.0.2",
     "cordova-plugin-dialogs": "^2.0.2",
     "cordova-plugin-firebasex-messaging": "^2.0.3",
-    "cordova-plugin-network-information": "^3.0.0"
+    "cordova-plugin-network-information": "^3.0.0",
+    "cordova-plugin-printlog-native": "file:plugins-local/cordova-plugin-printlog-native"
   },
   "cordova": {
     "plugins": {
@@ -39,7 +40,8 @@
         "ANDROID_SCHEME": " ",
         "ANDROID_HOST": " "
       },
-      "cordova-plugin-firebasex-messaging": {}
+      "cordova-plugin-firebasex-messaging": {},
+      "cordova-plugin-printlog-native": {}
     },
     "platforms": [
       "ios",

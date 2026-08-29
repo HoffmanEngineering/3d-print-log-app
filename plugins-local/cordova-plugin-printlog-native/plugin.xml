@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
+        id="cordova-plugin-printlog-native"
+        version="1.0.0">
+    <name>PrintLog Native Bridge</name>
+    <description>
+        Origin-restricted native bridge for push registration and notification taps.
+        Exists because cordova.js is unavailable once the WebView navigates to the remote
+        site, so the Angular app cannot reach plugins the normal way.
+    </description>
+    <license>AGPL-3.0-only</license>
+
+    <!--
+        Deliberately NO js-module. A js-module is injected by cordova.js, which is gone once
+        the WebView navigates to https://www.3dprintlog.com. The shim ships as an asset and
+        native evaluates it into the page, for the allowed origin only.
+    -->
+
+    <platform name="android">
+        <config-file target="res/xml/config.xml" parent="/*">
+            <feature name="PrintLogNative">
+                <param name="android-package" value="com.hoffmanengineering.printlog.PrintLogNativePlugin" />
+                <param name="onload" value="true" />
+            </feature>
+        </config-file>
+
+        <source-file src="src/android/PrintLogNativePlugin.java"
+                     target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
+        <source-file src="src/android/PrintLogBridgeRouter.java"
+                     target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
+
+        <asset src="www/printlog-native.js" target="printlog-native.js" />
+
+        <framework src="androidx.webkit:webkit:1.12.1" />
+    </platform>
+</plugin>

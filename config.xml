@@ -41,6 +41,19 @@
         </edit-config>
     </platform>
     <preference name="OverrideUserAgent" value="Mozilla/5.0 Google PrintLog/1.2" />
+    <!--
+        Base URL of the 3D Print Log API, used by cordova-plugin-printlog-native to register
+        this device for push notifications.
+
+        Read from here rather than accepted from the page on purpose: a page-supplied API
+        base would let compromised page script point the native bridge - and the user's
+        bearer token - at a server of its choosing.
+
+        MUST BE SET BEFORE PUSH WORKS. While it still says SET_ME the plugin logs a warning
+        and every registration returns ok:false, so push is simply off rather than pointed
+        somewhere wrong.
+    -->
+    <preference name="PrintLogApiUrl" value="SET_ME" />
     <preference name="StatusBarOverlaysWebView" value="false" />
     <preference name="StatusBarBackgroundColor" value="#3F50B5" />
     <preference name="AutoHideSplashScreen" value="true" />
