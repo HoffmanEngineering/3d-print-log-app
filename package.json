@@ -5,7 +5,7 @@
   "description": "Cordova hybrid mobile app for 3D Print Log — log and track your 3D prints, print times, filament usage, and settings.",
   "main": "index.js",
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node --test test/*.test.js",
     "check:user-agent": "node scripts/check-user-agent-contract.mjs",
     "build:android": "cordova build android",
     "release:android": "cordova build android --prod --release --buildConfig=build.json",

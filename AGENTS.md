@@ -117,14 +117,31 @@ tag be pushed.
   `scripts/check-user-agent-contract.mjs` checks both repos in CI, and reads the UI's actual
   `CORDOVA_USER_AGENT` constant rather than a hardcoded copy. Run it locally with
   `PRINT_LOG_UI_PATH=../3d-print-log-ui npm run check:user-agent`.
-- **`npm test` must stay scoped to `test/`.** `ci.yml` checks the `print-log-ui` repo out
-  *into this workspace* (`path: print-log-ui`) so `check:user-agent` can read the UI's real
-  `CORDOVA_USER_AGENT`. A bare `node --test` recurses from the working directory and so
-  discovers the UI repo's test files as well as ours, running them with the wrong cwd. That
-  went unnoticed until the UI added a test that reads a file by relative path, which then
-  failed every app PR with an ENOENT naming a UI source file. The script therefore pins its
-  own glob: `node --test "test/**/*.test.js"`. Quoted so Node expands it rather than the
-  shell, which keeps it identical on Windows and on the CI runner.
+- **CI checks the UI repo out as a SIBLING of this one, never inside it.** `ci.yml` needs
+  `print-log-ui` so `check:user-agent` can read the UI's real `CORDOVA_USER_AGENT`. This
+  repo is therefore checked out into `app/`, the job sets
+  `defaults.run.working-directory: app`, and the UI lands next to it at the workspace root
+  (`PRINT_LOG_UI_PATH: ../print-log-ui`).
+
+  It used to be checked out *into* the workspace root alongside our own files, which meant
+  anything walking the working directory swept it up. A bare `node --test` recursed from the
+  repo root and collected the UI's test files as well as ours, running them with the wrong
+  cwd. That was invisible until the UI added a test that opens a file by relative path, at
+  which point every app PR failed with an ENOENT naming a UI component template — an error
+  belonging to neither this repo nor this branch. Keep the two trees separate: two
+  `actions/checkout` steps writing into the same tree is the bug, not the symptom.
+
+  Note `path:` on `upload-artifact` is relative to the workspace, not to
+  `defaults.working-directory`, because it is an action input rather than a run step.
+
+- **`npm test` targets its own suite: `node --test test/*.test.js`.** Defence in depth
+  behind the layout above, and correct in its own right — the script should run this repo's
+  tests, not whatever happens to be under the cwd. **Leave the glob unquoted.** CI runs
+  Node 20, which takes only file and directory paths; a quoted pattern arrives as a literal
+  path it cannot find. Unquoted, the runner's bash expands it first. On Windows npm uses
+  cmd, which does not expand it, but local Node is 22 and expands the pattern itself. A bare
+  directory argument (`--test test`) is not portable either: Node 22 tries to load it as a
+  module.
 
 - **Editing `plugins-local/` alone changes nothing you build.** That tree is the source of
   truth only at `cordova plugin add` time. A plain `cordova build android` compiles the
