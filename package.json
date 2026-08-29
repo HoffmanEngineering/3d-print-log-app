@@ -1,7 +1,7 @@
 {
   "name": "com.hoffmanengineering.printlog",
   "displayName": "3D Print Log",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Cordova hybrid mobile app for 3D Print Log — log and track your 3D prints, print times, filament usage, and settings.",
   "main": "index.js",
   "scripts": {
