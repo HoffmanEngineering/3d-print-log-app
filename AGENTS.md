@@ -117,6 +117,15 @@ tag be pushed.
   `scripts/check-user-agent-contract.mjs` checks both repos in CI, and reads the UI's actual
   `CORDOVA_USER_AGENT` constant rather than a hardcoded copy. Run it locally with
   `PRINT_LOG_UI_PATH=../3d-print-log-ui npm run check:user-agent`.
+- **`npm test` must stay scoped to `test/`.** `ci.yml` checks the `print-log-ui` repo out
+  *into this workspace* (`path: print-log-ui`) so `check:user-agent` can read the UI's real
+  `CORDOVA_USER_AGENT`. A bare `node --test` recurses from the working directory and so
+  discovers the UI repo's test files as well as ours, running them with the wrong cwd. That
+  went unnoticed until the UI added a test that reads a file by relative path, which then
+  failed every app PR with an ENOENT naming a UI source file. The script therefore pins its
+  own glob: `node --test "test/**/*.test.js"`. Quoted so Node expands it rather than the
+  shell, which keeps it identical on Windows and on the CI runner.
+
 - **Editing `plugins-local/` alone changes nothing you build.** That tree is the source of
   truth only at `cordova plugin add` time. A plain `cordova build android` compiles the
   *copies*, so an edit there produces a byte-identical APK and any conclusion drawn from
