@@ -117,6 +117,46 @@ tag be pushed.
   `scripts/check-user-agent-contract.mjs` checks both repos in CI, and reads the UI's actual
   `CORDOVA_USER_AGENT` constant rather than a hardcoded copy. Run it locally with
   `PRINT_LOG_UI_PATH=../3d-print-log-ui npm run check:user-agent`.
+- **Editing `plugins-local/` alone changes nothing you build.** That tree is the source of
+  truth only at `cordova plugin add` time. A plain `cordova build android` compiles the
+  *copies*, so an edit there produces a byte-identical APK and any conclusion drawn from
+  testing it is void. After editing a local plugin, propagate to every copy:
+
+  | Edited file | Also update |
+  | --- | --- |
+  | `src/android/*.java` | `platforms/android/app/src/main/java/com/hoffmanengineering/printlog/` **and** `plugins/cordova-plugin-printlog-native/src/android/` |
+  | `www/printlog-native.js` | `platforms/android/app/src/main/assets/www/`, `platforms/android/platform_www/`, **and** `plugins/cordova-plugin-printlog-native/www/` |
+
+  The shim is loaded as an Android **asset** (`SHIM_ASSET = "www/printlog-native.js"`), not
+  as a Cordova js-module, which is why it has its own separate copies. Re-adding the plugin
+  (`cordova plugin remove`/`add`) also works. Verify before trusting a device test — the APK
+  is the only thing that counts:
+
+  ```bash
+  apk=platforms/android/app/build/outputs/apk/debug/app-debug.apk
+  unzip -p $apk assets/www/printlog-native.js | grep -c <your new symbol>
+  for d in $(unzip -l $apk | grep -oE "classes[0-9]*\.dex"); do
+      unzip -p $apk $d | grep -ac <your new symbol>; done
+  ```
+
+- **Notification taps arrive on two different paths, and only one of them sets `tap`.** The
+  API sends messages carrying an FCM `notification` block, so whenever the app is
+  backgrounded or not running the **system tray** handles them: `onMessageReceived` never
+  fires, the SDK posts the card itself, and the tap launches `MainActivity` with the `data`
+  map as raw intent extras. firebasex's `OnNotificationReceiverActivity` — the only thing
+  that adds a `"tap"` extra — runs on the foreground path only.
+  `PrintLogNativePlugin.capturePendingTap` therefore keys off **`notificationId`**, which
+  both paths carry. Do not reintroduce a `"tap"` check; it silently drops every tray tap,
+  which is the common case for a print finishing while the phone is in a pocket.
+
+- **There is no `resume` event on the remote origin.** `cordova.js` is loaded only by the
+  local bootstrap `www/index.html`; once the WebView navigates to `https://www.3dprintlog.com`
+  it is gone, so `document.addEventListener('resume', ...)` in the Angular app never fires.
+  A tap that arrives while the page is already loaded is delivered by native calling
+  `window.PrintLogNative.signalPendingTap()`, which the UI subscribes to via
+  `NativeBridgeService.onPendingTap`. The same trap applies to any other Cordova-JS API
+  reached from page script — see `docs/superpowers/notes/2026-08-28-firebasex-receiver-contract.md`.
+
 - `google-services.json` is **required for the Android build** — without it Gradle fails at
   `:app:processDebugGoogleServices`. It is gitignored and injected in CI from the
   `GOOGLE_SERVICES_JSON_BASE64` secret (repository secret for `ci.yml`, `production`

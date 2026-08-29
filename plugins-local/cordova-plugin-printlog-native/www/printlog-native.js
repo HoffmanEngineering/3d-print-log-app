@@ -25,6 +25,11 @@
   var pending = Object.create(null);
   var nextId = 0;
 
+  // Listeners for taps that arrive while the page is already loaded. The page cannot use
+  // Cordova's `resume` event for this: cordova.js is gone on the remote origin, so that
+  // event never fires here. Native calls signalPendingTap instead.
+  var tapListeners = [];
+
   host.addEventListener('message', function (event) {
     var reply;
     try {
@@ -114,6 +119,31 @@
       return request('consumePendingTap').then(function (reply) {
         return normaliseTap(reply.tap);
       });
+    },
+
+    /**
+     * Register interest in taps that arrive after the page has loaded. The listener is a
+     * signal, not a delivery: it calls consumePendingTap itself, so the tap keeps being
+     * claimed exactly once through the one native path that clears it.
+     */
+    onPendingTap: function (listener) {
+      if (typeof listener === 'function') {
+        tapListeners.push(listener);
+      }
+    },
+
+    /**
+     * Called by native when a tap has been captured. Every listener runs even if an earlier
+     * one throws: a bug in page script must not strand a tap native already holds.
+     */
+    signalPendingTap: function () {
+      for (var i = 0; i < tapListeners.length; i++) {
+        try {
+          tapListeners[i]();
+        } catch (e) {
+          // Deliberately swallowed; see above.
+        }
+      }
     }
   };
 

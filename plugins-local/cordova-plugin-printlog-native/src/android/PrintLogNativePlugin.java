@@ -62,9 +62,6 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
     private static final String KEY_NOTIFICATION_ID = "notificationId";
     private static final String KEY_PRINT_ID = "printId";
 
-    /** Only a bundle carrying this key came from a notification tap. */
-    private static final String KEY_TAP = "tap";
-
     private static final int HTTP_TIMEOUT_MS = 15000;
     private static final long TOKEN_TIMEOUT_SECONDS = 10;
 
@@ -124,17 +121,32 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
         }
 
         Bundle extras = intent.getExtras();
-        if (extras == null || !extras.containsKey(KEY_TAP)) {
-            // No "tap" key means this launch was not a notification tap. Every other intent
-            // that reaches us — the launcher icon, an OAuth callback — must be ignored.
+        if (extras == null) {
             return;
         }
 
+        // notificationId, not the "tap" key, is what identifies a tap.
+        //
+        // A message carrying an FCM `notification` block is handled by the system tray
+        // whenever the app is backgrounded or not running: onMessageReceived is never
+        // called, the SDK posts the card, and the tap launches this activity with the `data`
+        // map as raw extras. OnNotificationReceiverActivity — the only thing that adds
+        // "tap" — never runs on that path, which is the common one for a print that
+        // finishes while the phone is in a pocket. Keying off "tap" therefore dropped every
+        // tray tap on the floor.
+        //
+        // Both paths carry notificationId, because the API puts it in `data` and both the
+        // tray and the plugin copy `data` onto the launch intent verbatim. Nothing else that
+        // reaches us — the launcher icon, an OAuth callback — carries it.
         if (extras.getString(KEY_NOTIFICATION_ID) == null) {
             return;
         }
 
         pendingTap.set(extras);
+
+        // The page may already be loaded, in which case nothing is going to ask us for this
+        // tap on its own: the app's `resume` event does not exist on the remote origin.
+        notifyPendingTap();
     }
 
     /**
@@ -173,6 +185,19 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
         cordova.getActivity().runOnUiThread(() -> {
             WebView view = (WebView) webView.getView();
             view.evaluateJavascript(script, null);
+        });
+    }
+
+    /**
+     * Tell the page a tap is waiting. Safe to call before the shim is injected: the guard
+     * makes it a no-op, and the cold-start path drains the tap when Angular boots instead.
+     */
+    private void notifyPendingTap() {
+        cordova.getActivity().runOnUiThread(() -> {
+            WebView view = (WebView) webView.getView();
+            view.evaluateJavascript(
+                    "window.PrintLogNative && window.PrintLogNative.signalPendingTap();",
+                    null);
         });
     }
 

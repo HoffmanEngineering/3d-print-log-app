@@ -142,3 +142,49 @@ test('a native error resolves rather than rejecting into the app', async () => {
 
     assert.equal((await result).ok, false);
 });
+
+/**
+ * A tap that arrives while the page is already loaded has no Cordova `resume` event to ride
+ * on — cordova.js is gone on the remote origin — so native signals the page directly and the
+ * page drains the tap in response. See PrintLogNativePlugin.notifyPendingTap.
+ */
+test('onPendingTap fires when native signals a tap arrived', () => {
+    const { bridge } = installShim();
+    let fired = 0;
+
+    bridge.onPendingTap(() => { fired += 1; });
+    bridge.signalPendingTap();
+
+    assert.equal(fired, 1);
+});
+
+test('onPendingTap notifies every registered listener', () => {
+    const { bridge } = installShim();
+    const fired = [];
+
+    bridge.onPendingTap(() => fired.push('a'));
+    bridge.onPendingTap(() => fired.push('b'));
+    bridge.signalPendingTap();
+
+    assert.deepEqual(fired, ['a', 'b']);
+});
+
+test('a signal with no listener registered does not throw', () => {
+    const { bridge } = installShim();
+    assert.doesNotThrow(() => bridge.signalPendingTap());
+});
+
+/**
+ * One listener throwing must not stop the others: the page registers these, and a bug in
+ * page script must not be able to strand a tap that native has already captured.
+ */
+test('a throwing listener does not stop the rest', () => {
+    const { bridge } = installShim();
+    const fired = [];
+
+    bridge.onPendingTap(() => { throw new Error('page bug'); });
+    bridge.onPendingTap(() => fired.push('b'));
+
+    assert.doesNotThrow(() => bridge.signalPendingTap());
+    assert.deepEqual(fired, ['b']);
+});
