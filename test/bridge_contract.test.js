@@ -91,7 +91,7 @@ test('concurrent requests are correlated, not confused', async () => {
     assert.equal((await second).ok, false);
 });
 
-test('consumePendingTap normalises a valid payload', async () => {
+test('consumePendingTap normalizes a valid payload', async () => {
     const { bridge, reply } = installShim();
     const pending = bridge.consumePendingTap();
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Verifies that the user agent this app pins and the one the UI recognises still match.
+ * Verifies that the user agent this app pins and the one the UI recognizes still match.
  *
  * config.xml's OverrideUserAgent is load-bearing: the UI's isCordova compares
  * navigator.userAgent for EXACT equality with it. Bump the version in one repo and not the
- * other and every Cordova-specific behaviour in the shipped app silently switches off —
+ * other and every Cordova-specific behavior in the shipped app silently switches off —
  * push registration, the native file chooser, the Auth0 redirect URI. Nothing errors. The
  * app just quietly becomes a plain browser.
  *
@@ -69,7 +69,7 @@ const ui = uiUserAgent();
 
 if (app !== ui) {
   fail(
-    'the two repos disagree, so every Cordova-only behaviour would be off in the ' +
+    'the two repos disagree, so every Cordova-only behavior would be off in the ' +
       'shipped app.\n' +
       `  ${CONFIG_XML}\n    OverrideUserAgent   = ${JSON.stringify(app)}\n` +
       `  ${PLATFORM_TS}\n    CORDOVA_USER_AGENT  = ${JSON.stringify(ui)}`

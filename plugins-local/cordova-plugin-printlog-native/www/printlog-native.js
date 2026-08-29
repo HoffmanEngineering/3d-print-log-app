@@ -67,7 +67,7 @@
    * carrying a path or a URL cannot become a navigation target. Native never navigates; the
    * Angular router does, from this value.
    */
-  function normaliseTap(tap) {
+  function normalizeTap(tap) {
     if (!tap || typeof tap.notificationId !== 'string' || !tap.notificationId) {
       return null;
     }
@@ -117,7 +117,7 @@
 
     consumePendingTap: function () {
       return request('consumePendingTap').then(function (reply) {
-        return normaliseTap(reply.tap);
+        return normalizeTap(reply.tap);
       });
     },
 

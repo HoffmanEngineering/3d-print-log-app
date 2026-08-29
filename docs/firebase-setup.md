@@ -20,7 +20,7 @@ the service account key is a real secret that can send push to every one of your
 ## 1. Create the Firebase project
 
 1. <https://console.firebase.google.com> → **Add project**.
-2. Name it something recognisable (e.g. `3d-print-log`). Google Analytics is optional and
+2. Name it something recognizable (e.g. `3d-print-log`). Google Analytics is optional and
    not used by this integration.
 
 If a project already exists for 3D Print Log, use it — do not create a second one. Tokens

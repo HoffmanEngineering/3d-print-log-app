@@ -60,7 +60,7 @@ jobs:
         run: npm ci
 
       # config.xml's OverrideUserAgent and the UI's CORDOVA_USER_AGENT must stay identical.
-      # Drift disables every Cordova-only behaviour in the shipped app - push registration
+      # Drift disables every Cordova-only behavior in the shipped app - push registration
       # included - and nothing errors, so only this check catches it.
       - name: Verify the user agent contract
         env:

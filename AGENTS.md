@@ -134,7 +134,7 @@ tag be pushed.
   Note `path:` on `upload-artifact` is relative to the workspace, not to
   `defaults.working-directory`, because it is an action input rather than a run step.
 
-- **`npm test` targets its own suite: `node --test test/*.test.js`.** Defence in depth
+- **`npm test` targets its own suite: `node --test test/*.test.js`.** Defense in depth
   behind the layout above, and correct in its own right — the script should run this repo's
   tests, not whatever happens to be under the cwd. **Leave the glob unquoted.** CI runs
   Node 20, which takes only file and directory paths; a quoted pattern arrives as a literal

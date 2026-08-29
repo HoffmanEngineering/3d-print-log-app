@@ -374,7 +374,7 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
             JSONObject json = new JSONObject();
             json.put(KEY_NOTIFICATION_ID, tap.getString(KEY_NOTIFICATION_ID));
             // Raw string. The shim validates it is a plain positive integer before anything
-            // acts on it — see printlog-native.js normaliseTap.
+            // acts on it — see printlog-native.js normalizeTap.
             json.put(KEY_PRINT_ID, tap.getString(KEY_PRINT_ID));
             return json;
         } catch (Exception e) {
