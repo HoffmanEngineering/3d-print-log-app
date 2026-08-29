@@ -27,6 +27,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -74,6 +75,18 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
      * and asks for it — seconds, not milliseconds.
      */
     private final AtomicReference<Bundle> pendingTap = new AtomicReference<>(null);
+
+    private static final int PERMISSION_REQUEST_CODE = 0;
+
+    /**
+     * How long to hold a bridge request open while the system permission dialog is up. Long
+     * enough for a user who reads it, short enough that a forgotten dialog cannot pin a
+     * thread-pool thread for the life of the process.
+     */
+    private static final long PERMISSION_TIMEOUT_SECONDS = 120;
+
+    /** The bridge request currently waiting on the permission dialog, if any. */
+    private final AtomicReference<CountDownLatch> permissionAnswer = new AtomicReference<>(null);
 
     @Override
     protected void pluginInitialize() {
@@ -177,10 +190,21 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
     private String shimSource;
 
     private void injectShim() {
-        final String script = shimSource();
-        if (script == null) {
+        final String source = shimSource();
+        if (source == null) {
             return;
         }
+
+        // The shim reads its starting values off the host object, but a WebMessageListener
+        // host exposes only postMessage/addEventListener — nothing native can hang a property
+        // on. Left to itself the page therefore always began at "default", so Settings
+        // reported notifications as disabled even for a user who had granted them, until
+        // something called requestPushPermission. Seed the real values at injection instead.
+        final String script = source
+                + ";(function (b) { if (!b) { return; }"
+                + " b.pushPermission = " + JSONObject.quote(currentPermission()) + ";"
+                + " b.appVersion = " + JSONObject.quote(appVersion()) + ";"
+                + " })(window.PrintLogNative);";
 
         cordova.getActivity().runOnUiThread(() -> {
             WebView view = (WebView) webView.getView();
@@ -234,11 +258,52 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
             return "granted";
         }
 
-        // cordova.requestPermission is asynchronous with no result available here; the page
-        // re-reads the state on its next call. Reporting "default" rather than guessing
-        // keeps the UI from claiming a grant the user has not made.
-        cordova.requestPermission(this, 0, Manifest.permission.POST_NOTIFICATIONS);
-        return "default";
+        // Wait for Android's answer rather than returning "default" immediately. Returning
+        // early made the first tap of "Enable Notifications" always report failure: the page
+        // cached "default" while the user was still looking at the system dialog, so Settings
+        // kept offering to enable something that had in fact just been granted, and only a
+        // second tap — which re-read the now-granted state — appeared to work.
+        //
+        // Blocking is safe here: bridge requests run on cordova.getThreadPool(), never the UI
+        // thread, and registerForPush already performs network I/O on it.
+        final CountDownLatch answered = new CountDownLatch(1);
+        permissionAnswer.set(answered);
+
+        try {
+            cordova.requestPermission(this, PERMISSION_REQUEST_CODE, Manifest.permission.POST_NOTIFICATIONS);
+
+            if (!answered.await(PERMISSION_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                // The user walked away from the dialog. Report what is true right now rather
+                // than inventing a denial; the next call re-reads it anyway.
+                return hasNotificationPermission() ? "granted" : "default";
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return hasNotificationPermission() ? "granted" : "default";
+        } finally {
+            permissionAnswer.compareAndSet(answered, null);
+        }
+
+        return hasNotificationPermission() ? "granted" : "denied";
+    }
+
+    /**
+     * Cordova delivers the permission dialog's outcome here. The grant state itself is read
+     * back from the system rather than from grantResults, so there is one source of truth.
+     */
+    @Override
+    public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            CountDownLatch waiting = permissionAnswer.getAndSet(null);
+            if (waiting != null) {
+                waiting.countDown();
+            }
+        }
+    }
+
+    /** The page-facing spelling of the current notification permission. */
+    private String currentPermission() {
+        return hasNotificationPermission() ? "granted" : "default";
     }
 
     private boolean hasNotificationPermission() {
