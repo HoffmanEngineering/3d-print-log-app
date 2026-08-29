@@ -121,12 +121,14 @@ tag be pushed.
   `:app:processDebugGoogleServices`. It is gitignored and injected in CI from the
   `GOOGLE_SERVICES_JSON_BASE64` secret (repository secret for `ci.yml`, `production`
   environment for `release.yml`), exactly the way `build.json` is. For a local build, put
-  the real file from the Firebase console at the project root.
-- `PrintLogApiUrl` in `config.xml` must be set to the production API base URL. While it says
-  `SET_ME`, `cordova-plugin-printlog-native` logs a warning and every push registration
-  returns `ok:false` — push is off rather than pointed somewhere wrong. It is read from
-  config rather than supplied by the page on purpose: a page-supplied API base would let
-  compromised page script send the user's bearer token to a server of its choosing.
+  the real file from the Firebase console at the project root. Full setup, both the client
+  file and the API's service account key: `docs/firebase-setup.md`.
+- `PrintLogApiUrl` in `config.xml` is the API base URL the native bridge posts device
+  registrations to — `https://api.3dprintlog.com`. It is read from config rather than
+  supplied by the page on purpose: a page-supplied API base would let compromised page
+  script send the user's bearer token to a server of its choosing. If it is ever empty or
+  still a placeholder, `cordova-plugin-printlog-native` logs a warning and every
+  registration returns `ok:false` — push is off rather than pointed somewhere wrong.
 
 ## Push Notifications
 
@@ -150,6 +152,10 @@ Two things are counter-intuitive and were established by reading the firebasex s
 
 The FCM token is never exposed to page script. The page hands native its bearer token and
 native performs the `/api/devices` call.
+
+Firebase credentials — the client `google-services.json` and the API's service account key,
+which are different credentials with different handling — are covered in
+`docs/firebase-setup.md`.
 
 ## iOS Build Notes
 
