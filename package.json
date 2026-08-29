@@ -6,6 +6,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test",
+    "check:user-agent": "node scripts/check-user-agent-contract.mjs",
     "build:android": "cordova build android",
     "release:android": "cordova build android --prod --release --buildConfig=build.json",
     "build:ios": "cordova build ios",

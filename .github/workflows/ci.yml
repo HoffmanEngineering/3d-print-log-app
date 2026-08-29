@@ -38,8 +38,31 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Check out the UI repo for the user-agent contract
+        uses: actions/checkout@v4
+        with:
+          repository: HoffmanEngineering/3d-print-log-ui
+          path: print-log-ui
+
       - name: Install dependencies
         run: npm ci
+
+      # config.xml's OverrideUserAgent and the UI's CORDOVA_USER_AGENT must stay identical.
+      # Drift disables every Cordova-only behaviour in the shipped app - push registration
+      # included - and nothing errors, so only this check catches it.
+      - name: Verify the user agent contract
+        env:
+          PRINT_LOG_UI_PATH: print-log-ui
+        run: node scripts/check-user-agent-contract.mjs
+
+      - name: Run hook and contract tests
+        run: npm test
+
+      # The Android build fails at :app:processDebugGoogleServices without this. It is
+      # Firebase client config rather than a credential, but it identifies the project, so
+      # it is injected the same way build.json is rather than committed.
+      - name: Write google-services.json
+        run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > google-services.json
 
       - name: Add Android platform
         run: npx cordova platform add android@15.1.0

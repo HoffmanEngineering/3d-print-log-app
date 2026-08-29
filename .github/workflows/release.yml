@@ -43,6 +43,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The Android build fails at :app:processReleaseGoogleServices without this. Firebase
+      # client config rather than a credential, but it identifies the project, so it is
+      # injected from the production environment the same way build.json is.
+      - name: Write google-services.json
+        env:
+          GOOGLE_SERVICES_B64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: printf '%s' "$GOOGLE_SERVICES_B64" | base64 -d > google-services.json
+
       - name: Add Android platform
         run: npx cordova platform add android@15.1.0
 
@@ -83,4 +91,4 @@ jobs:
 
       - name: Clean up signing material
         if: always()
-        run: rm -f keystore.jks build.json
+        run: rm -f keystore.jks build.json google-services.json

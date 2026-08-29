@@ -110,6 +110,46 @@ tag be pushed.
 - Android build tools 36.0.0 is required (cordova-android 15.1.0 targets SDK 36)
 - The `patch_back_navigation.js` hook makes API 36 predictive-back gestures navigate WebView history before exiting; `www/js/index.js` uses `location.replace()` so the local bootstrap page is not retained in that history.
 - All Android-specific hooks (`patch_camera_permission.js`, `patch_auth_custom_tab.js`, `patch_back_navigation.js`) have platform guards that skip when not building for Android
+- `OverrideUserAgent` in `config.xml` is load-bearing: the UI's `isCordova`
+  (`src/app/core/utils/platform.ts`) compares `navigator.userAgent` for exact equality with
+  it. Changing the version in that string without the matching UI change silently disables
+  every Cordova-specific behavior in the shipped app, including push registration.
+  `scripts/check-user-agent-contract.mjs` checks both repos in CI, and reads the UI's actual
+  `CORDOVA_USER_AGENT` constant rather than a hardcoded copy. Run it locally with
+  `PRINT_LOG_UI_PATH=../3d-print-log-ui npm run check:user-agent`.
+- `google-services.json` is **required for the Android build** — without it Gradle fails at
+  `:app:processDebugGoogleServices`. It is gitignored and injected in CI from the
+  `GOOGLE_SERVICES_JSON_BASE64` secret (repository secret for `ci.yml`, `production`
+  environment for `release.yml`), exactly the way `build.json` is. For a local build, put
+  the real file from the Firebase console at the project root.
+- `PrintLogApiUrl` in `config.xml` must be set to the production API base URL. While it says
+  `SET_ME`, `cordova-plugin-printlog-native` logs a warning and every push registration
+  returns `ok:false` — push is off rather than pointed somewhere wrong. It is read from
+  config rather than supplied by the page on purpose: a page-supplied API base would let
+  compromised page script send the user's bearer token to a server of its choosing.
+
+## Push Notifications
+
+`plugins-local/cordova-plugin-printlog-native` bridges the remotely-loaded Angular app to
+native push. It exists because `cordova.js` is gone once the WebView navigates to
+`https://www.3dprintlog.com`, so the page cannot call plugins the normal way.
+`WebViewCompat.addWebMessageListener` restores a channel and — unlike
+`addJavascriptInterface` — takes an explicit origin allowlist, which matters because
+`config.xml` also permits Auth0 and Google.
+
+Two things are counter-intuitive and were established by reading the firebasex source:
+
+- **The plugin already posts foreground notifications for us.** Its `showNotification` test
+  includes `!hasNotificationsCallback()`, and this app can never register that JS callback,
+  so it posts every notification itself — on the `channel_id` the API sets. Posting one
+  ourselves would double every notification.
+- **`FirebasePluginMessageReceiver.sendMessage(Bundle)` never fires here**, for the same
+  reason: its only caller returns early when there is no JS callback. Notification taps are
+  therefore captured from the main activity's intent extras instead — `pluginInitialize()`
+  for a cold start, `onNewIntent()` for a warm one.
+
+The FCM token is never exposed to page script. The page hands native its bearer token and
+native performs the `/api/devices` call.
 
 ## iOS Build Notes
 
