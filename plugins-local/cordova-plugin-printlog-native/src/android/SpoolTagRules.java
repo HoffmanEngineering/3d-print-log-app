@@ -85,8 +85,27 @@ public final class SpoolTagRules {
         return hex.toString();
     }
 
-    /** Command-line entry for the node test: args are hex id, then tech-list entries. */
+    /**
+     * True for a chip whose SAK says MIFARE Classic (0x08, 0x18, 0x09, 0x88, 0x28) when the phone
+     * has no MifareClassic tech for it: the NFC chip in some phones cannot talk to Classic at all.
+     */
+    public static boolean classicUnsupported(int sak, String[] techList) {
+        int s = sak & 0xFF;
+        boolean classicSak = s == 0x08 || s == 0x18 || s == 0x09 || s == 0x88 || s == 0x28;
+        return classicSak && (techList == null
+                || !Arrays.asList(techList).contains("android.nfc.tech.MifareClassic"));
+    }
+
+    /**
+     * Command-line entry for the node test: args are hex id, then tech-list entries; or
+     * "classic-unsupported", a SAK in hex, then tech-list entries.
+     */
     public static void main(String[] args) {
+        if ("classic-unsupported".equals(args[0])) {
+            System.out.println(classicUnsupported(Integer.parseInt(args[1], 16),
+                    Arrays.copyOfRange(args, 2, args.length)));
+            return;
+        }
         byte[] id = new byte[args[0].length() / 2];
         for (int i = 0; i < id.length; i++) {
             id[i] = (byte) Integer.parseInt(args[0].substring(i * 2, i * 2 + 2), 16);

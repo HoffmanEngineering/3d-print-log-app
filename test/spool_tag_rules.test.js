@@ -83,6 +83,33 @@ test('a tag with no ID or no spool tech is dropped', { skip }, () => {
     assert.equal(classify('04A23F11', 'android.nfc.tech.Ndef'), 'drop no spool tech');
 });
 
+/** Runs SpoolTagRules.main in its classic-unsupported mode: "<sak hex> <techs...>" gives true or false. */
+function classicUnsupported(sakHex, ...techs) {
+    classify('00'); // compiles once
+    const java = path.join(path.dirname(javac), process.platform === 'win32' ? 'java.exe' : 'java');
+    const run = spawnSync(
+        fs.existsSync(java) ? java : 'java',
+        ['-cp', classesDir, 'com.hoffmanengineering.printlog.SpoolTagRules', 'classic-unsupported', sakHex, ...techs],
+        { encoding: 'utf8' }
+    );
+    assert.equal(run.status, 0, run.stderr);
+    return run.stdout.trim();
+}
+
+test('a Classic-looking chip without MifareClassic support is flagged', { skip }, () => {
+    assert.equal(classicUnsupported('08', NFCA), 'true');
+    assert.equal(classicUnsupported('18', NFCA), 'true');
+    assert.equal(classicUnsupported('09', NFCA), 'true');
+    assert.equal(classicUnsupported('88', NFCA), 'true');
+    assert.equal(classicUnsupported('28', NFCA), 'true');
+});
+
+test('a Classic chip the phone can read, or any other chip, is not flagged', { skip }, () => {
+    assert.equal(classicUnsupported('08', NFCA, CLASSIC), 'false');
+    assert.equal(classicUnsupported('00', NFCA), 'false');
+    assert.equal(classicUnsupported('20', NFCA), 'false');
+});
+
 test('every NFC action the shim sends runs on the UI thread', () => {
     const shim = fs.readFileSync(path.join(pluginDir, 'www', 'printlog-native.js'), 'utf8');
     const router = fs.readFileSync(path.join(javaDir, 'PrintLogBridgeRouter.java'), 'utf8');
