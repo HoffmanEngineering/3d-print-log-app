@@ -26,10 +26,23 @@ function findJavac() {
     return null;
 }
 
+const tempDirs = [];
+// Each test file is its own process: remove the class dirs when it ends (C: is nearly full).
+process.on('exit', () => {
+    for (const dir of tempDirs) {
+        try {
+            fs.rmSync(dir, { recursive: true, force: true });
+        } catch (e) {
+            // Best effort.
+        }
+    }
+});
+
 /** Compiles the named files of src/android into a new temp dir and returns it. */
 function compile(files) {
     const javac = findJavac();
     const classesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'printlog-java-'));
+    tempDirs.push(classesDir);
     const compiled = spawnSync(
         javac,
         ['-d', classesDir, ...files.map((file) => path.join(javaDir, file))],

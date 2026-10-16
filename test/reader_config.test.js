@@ -17,8 +17,8 @@ const skip = javac ? false : 'no javac (CI installs a JDK with setup-java)';
 
 // Dummy values for the tests only.
 const SALT = '00112233445566778899AABBCCDDEEFF';
-const hmac = (id, extra = '') => `${id}|hmac-sha256-sector|saltHex=${SALT};labelPrefix=key_a_${extra}`;
-const hkdf = (id, extra = '') => `${id}|hkdf-sha256-sectors|saltHex=${SALT};infoHex=52464944${extra}`;
+const hmac = (id, extra = '') => `${id}|hmac-sha256-sector|saltHex=${SALT};labelPrefix=label-${extra}`;
+const hkdf = (id, extra = '') => `${id}|hkdf-sha256-sectors|saltHex=${SALT};infoHex=00010203${extra}`;
 
 test('a valid hmac-sha256-sector format is kept', { skip }, () => {
     assert.deepEqual(validate(hmac('brand-a')), ['ok brand-a']);
@@ -33,14 +33,14 @@ test('sectors is optional and accepts 1 through 16', { skip }, () => {
 });
 
 test('an unknown scheme is dropped', { skip }, () => {
-    assert.deepEqual(validate(`brand-a|rot13|saltHex=${SALT};labelPrefix=key_a_`), ['drop']);
+    assert.deepEqual(validate(`brand-a|rot13|saltHex=${SALT};labelPrefix=label-`), ['drop']);
 });
 
 test('a non-hex or odd-length saltHex is dropped', { skip }, () => {
     assert.deepEqual(
         validate(
-            'a|hmac-sha256-sector|saltHex=0G;labelPrefix=key_a_',
-            'b|hmac-sha256-sector|saltHex=001;labelPrefix=key_a_',
+            'a|hmac-sha256-sector|saltHex=0G;labelPrefix=label-',
+            'b|hmac-sha256-sector|saltHex=001;labelPrefix=label-',
             'c|hkdf-sha256-sectors|saltHex=00;infoHex=5'
         ),
         ['drop', 'drop', 'drop']
@@ -52,7 +52,7 @@ test('a missing required param is dropped', { skip }, () => {
         validate(
             `a|hmac-sha256-sector|saltHex=${SALT}`,
             `b|hkdf-sha256-sectors|saltHex=${SALT}`,
-            'c|hmac-sha256-sector|labelPrefix=key_a_'
+            'c|hmac-sha256-sector|labelPrefix=label-'
         ),
         ['drop', 'drop', 'drop']
     );
@@ -74,7 +74,7 @@ test('a value over 256 characters is dropped', { skip }, () => {
     assert.deepEqual(
         validate(
             `a|hmac-sha256-sector|saltHex=${SALT};labelPrefix=${longPrefix}`,
-            `b|hkdf-sha256-sectors|saltHex=${'00'.repeat(129)};infoHex=52464944`
+            `b|hkdf-sha256-sectors|saltHex=${'00'.repeat(129)};infoHex=00010203`
         ),
         ['drop', 'drop']
     );
