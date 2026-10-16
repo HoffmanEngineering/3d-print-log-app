@@ -137,7 +137,7 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
     /** Whether the activity is between onResume and onPause. UI thread only. */
     private boolean resumed;
 
-    /** The latest tag read, as {uid, tech}. Written on a binder thread, claimed on the UI thread. */
+    /** The latest tag read, as {uid, tech, techs, classicUnsupported?, memory?}. Written on a binder thread, claimed on the UI thread. */
     private final AtomicReference<JSONObject> latestTag = new AtomicReference<>(null);
     // The session's vetted reader config; null reads the UID only (no config, or a hostile one).
     private volatile List<ReaderFormat> readerFormats = null;

@@ -251,6 +251,33 @@ material page's tag field and the Materials list's Scan spool sheet. Design:
   (`performHapticFeedback`, no `VIBRATE` permission) and calls `signalTag()`; the page claims it
   with `consumeTag()`. The shim accepts only uppercase hex, whole bytes, at most 64 digits, and
   `tech` in `nfca`/`nfcb`/`nfcf`/`nfcv`.
+- **Memory reading is opt-in per session.** `startTagReading(config)` takes the reader config
+  the UI fetched from the API (`GET /api/FilamentTags/reader-config`, shape
+  `{ formats: [{ id, scheme, params }] }`); `null`, a missing config or a rejected one means
+  UID-only, exactly as 1.3.0. The shim only forwards a plain object with a `formats` array of
+  at most 8; the plugin takes string `id`/`scheme`/`params` (at most 16 params; more than 8
+  formats rejects the whole config), and `ReaderConfig.format` re-validates each format: id
+  `^[a-z0-9-]{1,50}$`, the two schemes (`hmac-sha256-sector`, `hkdf-sha256-sectors`), values at
+  most 256 chars, hex params in whole-byte pairs, `labelPrefix` printable ASCII, `sectors` 1-16
+  (default 16). An invalid format is skipped, not fatal.
+- **Signal order for a tag:** `signalTagReading()` first (the page shows "reading"), then
+  `TagReader.read` on the reader thread with a 1.5 s budget, then store, buzz, `signalTag()`.
+  The page subscribes with `onTagReading(listener)`. Each tag operation is capped at
+  min(the tech's platform timeout, max(120 ms, time left)); NFC-V has no timeout setter. Partial
+  results are returned, never discarded.
+- **What the shim lets through in `memory`:** `kind` `classic`/`type2`/`nfcv`, `data` base64 of
+  at most 2800 chars, `keyFormat` (`^[a-z0-9-]{1,50}$`, Classic only) and `unreadable` (at most
+  16 ints, 0-15). Beside it, `techs` (the tag's tech list) and `classicUnsupported` (a Classic
+  tag on a phone whose NFC chip can't do Classic). Anything invalid is dropped on its own; the
+  UID still arrives. Classic is exactly 1024 bytes (unreadable sectors zero-filled), Type 2 at
+  most 1024, NFC-V at most 2048. The first configured format whose sector-0 key authenticates
+  is the tag's `keyFormat`; none authenticating means no memory.
+- **Pure-Java helpers, tested with javac:** `TagKeySchemes`, `ReaderConfig`/`ReaderFormat`,
+  `ClassicDump`/`PageDump` and the `TagMemory` test main have no Android imports; their tests
+  compile them through `test/helpers/javac.js` (skipped without a JDK; CI has one) and compare
+  against Node's `hkdfSync`/`createHmac`. `TagReader` itself is device I/O and has no unit test.
+- **Never log memory, keys or config params, and never commit vendor constants.** Tests use
+  neutral dummies (salt `00112233445566778899AABBCCDDEEFF`, label `label-`, info `00010203`).
 - **Dropped silently, before the buzz:** ISO-DEP tags (payment and transit cards, phones) and
   NFC-A 4-byte UIDs starting `0x08` (random IDs). Platform sounds are off for the same reason.
 - **NFC-V UIDs are byte-reversed** so they read in the printed `E0…` order, the same UID
