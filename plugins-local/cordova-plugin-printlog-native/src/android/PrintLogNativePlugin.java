@@ -1,11 +1,20 @@
 package com.hoffmanengineering.printlog;
 
 import android.Manifest;
+import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.nfc.NfcAdapter;
+import android.nfc.Tag;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.util.Log;
+import android.view.HapticFeedbackConstants;
 import android.webkit.WebView;
 
 import androidx.core.content.ContextCompat;
@@ -25,14 +34,17 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Bridges the remotely-loaded Angular app to native push APIs.
+ * Bridges the remotely-loaded Angular app to native push and NFC tag reading.
  *
  * The WebView navigates to https://www.3dprintlog.com, after which cordova.js is gone and
  * the page cannot call plugins the normal way. WebViewCompat.addWebMessageListener gives a
@@ -88,6 +100,39 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
     /** The bridge request currently waiting on the permission dialog, if any. */
     private final AtomicReference<CountDownLatch> permissionAnswer = new AtomicReference<>(null);
 
+    // ---- NFC tag reading ----
+    //
+    // The page holds a reading session (startTagReading .. stopTagReading) while a screen is
+    // listening for tags. Reader mode is on only while that session is open, NFC is on and the
+    // activity is resumed: enableReaderMode requires a resumed activity, and it pauses card
+    // emulation (tap-to-pay) for as long as it is on.
+
+    private static final int READER_FLAGS = NfcAdapter.FLAG_READER_NFC_A
+            | NfcAdapter.FLAG_READER_NFC_B
+            | NfcAdapter.FLAG_READER_NFC_F
+            | NfcAdapter.FLAG_READER_NFC_V
+            | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK
+            // Dropped tags (payment cards, phones) must make no sound. The haptic is the only
+            // feedback, and it fires only for a tag we keep.
+            | NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS;
+
+    private static final String TECH_ISO_DEP = "android.nfc.tech.IsoDep";
+
+    /** Whether the page has an open reading session. UI thread only. */
+    private boolean tagReading;
+
+    /** Whether the activity is between onResume and onPause. UI thread only. */
+    private boolean resumed;
+
+    /** The latest tag read, as {uid, tech}. Written on a binder thread, claimed on the UI thread. */
+    private final AtomicReference<JSONObject> latestTag = new AtomicReference<>(null);
+
+    /**
+     * Turning NFC on or off from the Quick Settings shade does not pause the activity, so
+     * onResume alone would miss it. Registered while a session is open and the app is in front.
+     */
+    private BroadcastReceiver nfcStateReceiver;
+
     @Override
     protected void pluginInitialize() {
         router = new PrintLogBridgeRouter(this);
@@ -115,6 +160,14 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
                     }
 
                     final String data = message.getData();
+
+                    // NFC actions run right here, on the UI thread, in the order the page
+                    // posted them. See PrintLogBridgeRouter.UI_THREAD_ACTIONS.
+                    if (PrintLogBridgeRouter.isUiThreadAction(data)) {
+                        replyProxy.postMessage(router.handle(data));
+                        return;
+                    }
+
                     // Off the UI thread: registerForPush makes a network call.
                     cordova.getThreadPool().execute(
                             () -> replyProxy.postMessage(router.handle(data)));
@@ -170,6 +223,12 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
     public Object onMessage(String id, Object data) {
         if ("onPageFinished".equals(id) && data instanceof String) {
             String url = (String) data;
+            // Any full page load ends a reading session. The page that opened it is gone, so
+            // nothing would claim its tags, and reader mode would keep swallowing taps (and
+            // tap-to-pay) with no screen listening. Angular route changes are pushState
+            // navigations and never reach here.
+            stopTagReading();
+
             for (String origin : ALLOWED_ORIGINS) {
                 if (url.startsWith(origin + "/") || url.equals(origin)) {
                     injectShim();
@@ -380,6 +439,254 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
         } catch (Exception e) {
             return null;
         }
+    }
+
+    @Override
+    public String nfcStatus() {
+        NfcAdapter adapter = nfcAdapter();
+        if (adapter == null) {
+            return "unsupported";
+        }
+        return adapter.isEnabled() ? "ready" : "off";
+    }
+
+    @Override
+    public String startTagReading() {
+        // A tag left over from an earlier session belongs to a screen that is gone.
+        latestTag.set(null);
+        tagReading = true;
+        if (resumed) {
+            registerNfcStateReceiver();
+        }
+        applyReaderMode();
+        return nfcStatus();
+    }
+
+    @Override
+    public void stopTagReading() {
+        tagReading = false;
+        latestTag.set(null);
+        unregisterNfcStateReceiver();
+        applyReaderMode();
+    }
+
+    @Override
+    public JSONObject consumeTag() {
+        return latestTag.getAndSet(null);
+    }
+
+    /**
+     * The in-app NFC panel where there is one, then the NFC settings screen, then wireless
+     * settings: some OEM builds resolve neither of the first two.
+     */
+    @Override
+    public boolean openNfcSettings() {
+        List<String> actions = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            actions.add(Settings.Panel.ACTION_NFC);
+        }
+        actions.add(Settings.ACTION_NFC_SETTINGS);
+        actions.add(Settings.ACTION_WIRELESS_SETTINGS);
+
+        Activity activity = cordova.getActivity();
+        for (String action : actions) {
+            try {
+                activity.startActivity(new Intent(action));
+                return true;
+            } catch (ActivityNotFoundException | SecurityException e) {
+                Log.w(TAG, "No activity for " + action);
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public void onResume(boolean multitasking) {
+        super.onResume(multitasking);
+        resumed = true;
+        if (tagReading) {
+            registerNfcStateReceiver();
+            applyReaderMode();
+            // The user may be back from the NFC settings screen.
+            signalNfcStatus();
+        }
+    }
+
+    @Override
+    public void onPause(boolean multitasking) {
+        super.onPause(multitasking);
+        resumed = false;
+        unregisterNfcStateReceiver();
+        applyReaderMode();
+    }
+
+    @Override
+    public void onDestroy() {
+        unregisterNfcStateReceiver();
+        super.onDestroy();
+    }
+
+    private NfcAdapter nfcAdapter() {
+        try {
+            return NfcAdapter.getDefaultAdapter(cordova.getActivity());
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Reader mode on exactly when a session is open, the app is in front and NFC is on. */
+    private void applyReaderMode() {
+        NfcAdapter adapter = nfcAdapter();
+        if (adapter == null) {
+            return;
+        }
+
+        Activity activity = cordova.getActivity();
+        try {
+            if (tagReading && resumed && adapter.isEnabled()) {
+                adapter.enableReaderMode(activity, this::onTagDiscovered, READER_FLAGS, null);
+            } else {
+                adapter.disableReaderMode(activity);
+            }
+        } catch (RuntimeException e) {
+            // IllegalStateException when the activity is not resumed after all, or an adapter
+            // that went away. Either way there is nothing to read with right now.
+            Log.w(TAG, "Could not change reader mode: " + e.getMessage());
+        }
+    }
+
+    private void registerNfcStateReceiver() {
+        if (nfcStateReceiver != null || nfcAdapter() == null) {
+            return;
+        }
+
+        nfcStateReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                int state = intent.getIntExtra(NfcAdapter.EXTRA_ADAPTER_STATE, NfcAdapter.STATE_OFF);
+                if (state == NfcAdapter.STATE_ON || state == NfcAdapter.STATE_OFF) {
+                    applyReaderMode();
+                    signalNfcStatus();
+                }
+            }
+        };
+
+        // Not exported: ACTION_ADAPTER_STATE_CHANGED is a system broadcast, which still reaches
+        // a not-exported receiver, and no other app has any business sending it to us.
+        ContextCompat.registerReceiver(
+                cordova.getActivity(), nfcStateReceiver,
+                new IntentFilter(NfcAdapter.ACTION_ADAPTER_STATE_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    private void unregisterNfcStateReceiver() {
+        if (nfcStateReceiver == null) {
+            return;
+        }
+        try {
+            cordova.getActivity().unregisterReceiver(nfcStateReceiver);
+        } catch (IllegalArgumentException e) {
+            // Already gone.
+        }
+        nfcStateReceiver = null;
+    }
+
+    /**
+     * Runs on a binder thread. Stores the tag, then buzzes and signals on the UI thread.
+     * Nothing from the tag is put into script: the page claims it with consumeTag.
+     */
+    private void onTagDiscovered(Tag tag) {
+        JSONObject read = describeSpoolTag(tag);
+        if (read == null) {
+            return;
+        }
+
+        latestTag.set(read);
+
+        cordova.getActivity().runOnUiThread(() -> {
+            WebView view = (WebView) webView.getView();
+            view.performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                    ? HapticFeedbackConstants.CONFIRM
+                    : HapticFeedbackConstants.LONG_PRESS);
+            view.evaluateJavascript(
+                    "window.PrintLogNative && window.PrintLogNative.signalTag"
+                            + " && window.PrintLogNative.signalTag();",
+                    null);
+        });
+    }
+
+    /**
+     * @return {uid, tech} for a tag that could be on a spool, or null for one to drop
+     *         silently: ISO-DEP tags (payment, transit and ID cards, and phones; spool tags
+     *         are MIFARE Classic, NTAG or ISO 15693, never ISO-DEP) and NFC-A random IDs,
+     *         which change on every read.
+     */
+    static JSONObject describeSpoolTag(Tag tag) {
+        if (tag == null) {
+            return null;
+        }
+
+        List<String> techs = Arrays.asList(tag.getTechList());
+        if (techs.contains(TECH_ISO_DEP)) {
+            return null;
+        }
+
+        String tech;
+        if (techs.contains("android.nfc.tech.NfcV")) {
+            tech = "nfcv";
+        } else if (techs.contains("android.nfc.tech.NfcA")) {
+            tech = "nfca";
+        } else if (techs.contains("android.nfc.tech.NfcB")) {
+            tech = "nfcb";
+        } else if (techs.contains("android.nfc.tech.NfcF")) {
+            tech = "nfcf";
+        } else {
+            return null;
+        }
+
+        byte[] id = tag.getId();
+        if (id == null || id.length == 0) {
+            return null;
+        }
+
+        // ISO 14443-3: a 4-byte UID starting 0x08 is a random ID, new on every read.
+        if ("nfca".equals(tech) && id.length == 4 && (id[0] & 0xFF) == 0x08) {
+            return null;
+        }
+
+        try {
+            JSONObject json = new JSONObject();
+            json.put("uid", hexUid(id, "nfcv".equals(tech)));
+            json.put("tech", tech);
+            return json;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Uppercase hex with no separators, as TagUid.Normalize stores it. Android returns an
+     * ISO 15693 UID least significant byte first; reversed, it reads in the printed E0... order
+     * that OpenPrintTag readers report.
+     */
+    static String hexUid(byte[] id, boolean reverse) {
+        StringBuilder hex = new StringBuilder(id.length * 2);
+        for (int i = 0; i < id.length; i++) {
+            byte b = id[reverse ? id.length - 1 - i : i];
+            hex.append(Character.toUpperCase(Character.forDigit((b >> 4) & 0xF, 16)));
+            hex.append(Character.toUpperCase(Character.forDigit(b & 0xF, 16)));
+        }
+        return hex.toString();
+    }
+
+    private void signalNfcStatus() {
+        cordova.getActivity().runOnUiThread(() -> {
+            WebView view = (WebView) webView.getView();
+            view.evaluateJavascript(
+                    "window.PrintLogNative && window.PrintLogNative.signalNfcStatus"
+                            + " && window.PrintLogNative.signalNfcStatus();",
+                    null);
+        });
     }
 
     // ---- helpers ----

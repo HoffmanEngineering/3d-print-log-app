@@ -4,7 +4,8 @@
         version="1.0.0">
     <name>PrintLog Native Bridge</name>
     <description>
-        Origin-restricted native bridge for push registration and notification taps.
+        Origin-restricted native bridge for push registration, notification taps and NFC
+        spool tag reading.
         Exists because cordova.js is unavailable once the WebView navigates to the remote
         site, so the Angular app cannot reach plugins the normal way.
     </description>

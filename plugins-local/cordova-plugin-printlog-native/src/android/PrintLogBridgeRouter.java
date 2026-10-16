@@ -3,6 +3,11 @@ package com.hoffmanengineering.printlog;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+
 /**
  * The request/response protocol spoken over the web message channel.
  *
@@ -33,6 +38,53 @@ public class PrintLogBridgeRouter {
          *         acts on the value, and doing it there keeps it under test.
          */
         JSONObject consumePendingTap();
+
+        /** @return {@code unsupported}, {@code off} or {@code ready}. */
+        String nfcStatus();
+
+        /**
+         * Starts a tag-reading session: clears any stored tag and sets the reading flag. Reader
+         * mode itself turns on only while NFC is on and the activity is in front.
+         *
+         * @return the NFC status, as {@link #nfcStatus()}.
+         */
+        String startTagReading();
+
+        /** Ends the session: clears the flag and the stored tag, and turns reader mode off. */
+        void stopTagReading();
+
+        /**
+         * @return the latest tag as {@code {uid, tech}}, claimed once, or null. Validation is
+         *         the shim's job, as for taps.
+         */
+        JSONObject consumeTag();
+
+        /** @return true if some NFC or wireless settings screen was opened. */
+        boolean openNfcSettings();
+    }
+
+    /**
+     * Actions handled synchronously on the UI thread, in the order the page posted them.
+     *
+     * The web message listener is called on the UI thread in posting order, but the thread
+     * pool that push actions go to is multi-threaded, so two requests sent there can finish in
+     * either order. A stopTagReading posted just before a startTagReading (one screen closing
+     * as the next opens) must not run last and leave the reader off under an open picker.
+     * These actions only touch NfcAdapter and the activity, so they are cheap enough for the
+     * UI thread.
+     */
+    private static final Set<String> UI_THREAD_ACTIONS = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList(
+                    "nfcStatus", "startTagReading", "stopTagReading", "consumeTag",
+                    "openNfcSettings")));
+
+    /** @return true if the request names an action that must run on the UI thread. */
+    public static boolean isUiThreadAction(String rawRequest) {
+        try {
+            return UI_THREAD_ACTIONS.contains(new JSONObject(rawRequest).optString("action", ""));
+        } catch (JSONException e) {
+            return false;
+        }
     }
 
     private final Actions actions;
@@ -70,6 +122,21 @@ public class PrintLogBridgeRouter {
             } else if ("consumePendingTap".equals(action)) {
                 reply.put("ok", true);
                 reply.put("tap", actions.consumePendingTap());
+            } else if ("nfcStatus".equals(action)) {
+                reply.put("ok", true);
+                reply.put("nfc", actions.nfcStatus());
+            } else if ("startTagReading".equals(action)) {
+                reply.put("ok", true);
+                reply.put("nfc", actions.startTagReading());
+            } else if ("stopTagReading".equals(action)) {
+                actions.stopTagReading();
+                reply.put("ok", true);
+            } else if ("consumeTag".equals(action)) {
+                JSONObject tag = actions.consumeTag();
+                reply.put("ok", true);
+                reply.put("tag", tag == null ? JSONObject.NULL : tag);
+            } else if ("openNfcSettings".equals(action)) {
+                reply.put("ok", actions.openNfcSettings());
             } else {
                 reply.put("ok", false);
                 reply.put("error", "unknown action");
