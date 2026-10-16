@@ -40,7 +40,11 @@ final class TagReader {
     private static final byte NFCV_FLAGS = 0x22;
     private static final byte NFCV_GET_SYSTEM_INFO = 0x2B;
     private static final byte NFCV_READ_MULTIPLE_BLOCKS = 0x23;
-    private static final int NFCV_CHUNK_BLOCKS = 32;
+    /** Chunk size in blocks when GET_SYSTEM_INFO does not give a block size. */
+    private static final int NFCV_DEFAULT_CHUNK_BLOCKS = 32;
+    /** Bytes asked for per READ_MULTIPLE_BLOCKS when the block size is known. */
+    private static final int NFCV_CHUNK_BYTES = 128;
+    private static final int MIN_OP_TIMEOUT_MS = 120;
     private static final int NFCV_MAX_BLOCKS = 256;
 
     private TagReader() {
@@ -110,15 +114,21 @@ final class TagReader {
         int sectors = 0;
         try {
             mc.connect();
+            bound(mc, deadline);
             for (ReaderFormat format : formats) {
                 if (expired(deadline)) {
                     break;
                 }
-                byte[][] candidate = keys(format, uid);
+                byte[][] candidate;
+                try {
+                    candidate = keys(format, uid);
+                } catch (RuntimeException e) {
+                    continue;
+                }
                 if (candidate == null) {
                     continue;
                 }
-                if (authenticate(mc, 0, candidate[0])) {
+                if (authenticate(mc, 0, candidate[0], deadline)) {
                     keys = candidate;
                     dump.keyFormat = format.id;
                     sectors = Math.min(Math.min(format.sectors, keys.length),
@@ -131,12 +141,12 @@ final class TagReader {
             }
             for (int s = 0; s < sectors && !expired(deadline); s++) {
                 // Sector 0 was just authenticated by the format search.
-                if (s > 0 && !authenticate(mc, s, keys[s])) {
+                if (s > 0 && !authenticate(mc, s, keys[s], deadline)) {
                     continue;
                 }
                 byte[] sector = readSector(mc, s);
                 if (sector == null) {
-                    reconnect(mc);
+                    reconnect(mc, deadline);
                     continue;
                 }
                 dump.putSector(s, sector);
@@ -169,7 +179,7 @@ final class TagReader {
     }
 
     /** A failed authentication halts the card, so it reconnects before returning false. */
-    private static boolean authenticate(MifareClassic mc, int sector, byte[] key) {
+    private static boolean authenticate(MifareClassic mc, int sector, byte[] key, long deadline) {
         try {
             if (mc.authenticateSectorWithKeyA(sector, key)) {
                 return true;
@@ -177,7 +187,7 @@ final class TagReader {
         } catch (IOException e) {
             // Reconnect below.
         }
-        reconnect(mc);
+        reconnect(mc, deadline);
         return false;
     }
 
@@ -207,6 +217,7 @@ final class TagReader {
         PageDump dump = new PageDump(TYPE2_MAX_BYTES);
         try {
             nfcA.connect();
+            bound(nfcA, deadline);
             for (int page = 0; page <= TYPE2_LAST_PAGE && !expired(deadline); page += 4) {
                 byte[] data = nfcA.transceive(new byte[] {TYPE2_READ, (byte) page});
                 if (data == null || data.length < TYPE2_READ_BYTES) {
@@ -229,9 +240,11 @@ final class TagReader {
         PageDump dump = new PageDump(NFCV_MAX_BYTES);
         try {
             nfcV.connect();
-            int blocks = blockCount(nfcV, id);
-            for (int first = 0; first < blocks && !expired(deadline); first += NFCV_CHUNK_BLOCKS) {
-                int count = Math.min(NFCV_CHUNK_BLOCKS, blocks - first);
+            int[] layout = blockLayout(nfcV, id);
+            int blocks = layout[0];
+            int chunk = layout[1] > 0 ? Math.max(1, NFCV_CHUNK_BYTES / layout[1]) : NFCV_DEFAULT_CHUNK_BLOCKS;
+            for (int first = 0; first < blocks && !expired(deadline); first += chunk) {
+                    int count = Math.min(chunk, blocks - first);
                 byte[] reply = nfcV.transceive(addressed(NFCV_READ_MULTIPLE_BLOCKS, id,
                         new byte[] {(byte) first, (byte) (count - 1)}));
                 // Byte 0 is the response flags; bit 0 set means an error code follows.
@@ -251,15 +264,16 @@ final class TagReader {
     }
 
     /**
-     * The block count from GET_SYSTEM_INFO, so the last chunk asks only for blocks that exist
-     * (asking past the end fails the whole chunk). 256 when the tag does not say.
+     * { block count, block size in bytes } from GET_SYSTEM_INFO, so the last chunk asks only for
+     * blocks that exist (asking past the end fails the whole chunk). 256 blocks and size 0
+     * (unknown) when the tag does not say.
      */
-    private static int blockCount(NfcV nfcV, byte[] id) {
+    private static int[] blockLayout(NfcV nfcV, byte[] id) {
         try {
             byte[] info = nfcV.transceive(addressed(NFCV_GET_SYSTEM_INFO, id, null));
             // Flags, info flags, UID (8), then DSFID, AFI and memory size when their bits are set.
             if (info == null || info.length < 10 || (info[0] & 0x01) != 0) {
-                return NFCV_MAX_BLOCKS;
+                return new int[] {NFCV_MAX_BLOCKS, 0};
             }
             int infoFlags = info[1];
             int p = 10;
@@ -270,12 +284,13 @@ final class TagReader {
                 p++;
             }
             if ((infoFlags & 0x04) != 0 && info.length > p) {
-                return (info[p] & 0xFF) + 1;
+                int size = info.length > p + 1 ? (info[p + 1] & 0x1F) + 1 : 0;
+                return new int[] {(info[p] & 0xFF) + 1, size};
             }
         } catch (IOException e) {
             // Some tags do not implement it; read until an error instead.
         }
-        return NFCV_MAX_BLOCKS;
+        return new int[] {NFCV_MAX_BLOCKS, 0};
     }
 
     private static byte[] addressed(byte command, byte[] id, byte[] args) {
@@ -320,10 +335,27 @@ final class TagReader {
         return System.currentTimeMillis() >= deadline;
     }
 
-    private static void reconnect(MifareClassic mc) {
+    /** Caps one transceive so a stuck tag cannot eat more than the time left (at least 120 ms). */
+    private static void bound(TagTechnology tech, long deadline) {
+        long remaining = deadline - System.currentTimeMillis();
+        int timeout = (int) Math.min(Integer.MAX_VALUE, Math.max(MIN_OP_TIMEOUT_MS, remaining));
+        try {
+            if (tech instanceof MifareClassic) {
+                ((MifareClassic) tech).setTimeout(timeout);
+            } else if (tech instanceof NfcA) {
+                ((NfcA) tech).setTimeout(timeout);
+            }
+            // NfcV has no setTimeout: its transceive keeps the platform default.
+        } catch (RuntimeException e) {
+            // Keep the platform default.
+        }
+    }
+
+    private static void reconnect(MifareClassic mc, long deadline) {
         try {
             mc.close();
             mc.connect();
+            bound(mc, deadline);
         } catch (IOException e) {
             // The next call on mc fails and that sector is marked unreadable.
         }
