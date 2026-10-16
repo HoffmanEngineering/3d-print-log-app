@@ -112,9 +112,10 @@ final class TagReader {
         boolean[] read = new boolean[CLASSIC_SECTORS];
         byte[][] keys = null;
         int sectors = 0;
+        int platformTimeout = Integer.MAX_VALUE;
         try {
             mc.connect();
-            bound(mc, deadline);
+            platformTimeout = platformTimeout(mc);
             for (ReaderFormat format : formats) {
                 if (expired(deadline)) {
                     break;
@@ -128,7 +129,7 @@ final class TagReader {
                 if (candidate == null) {
                     continue;
                 }
-                if (authenticate(mc, 0, candidate[0], deadline)) {
+                if (authenticate(mc, 0, candidate[0], platformTimeout, deadline)) {
                     keys = candidate;
                     dump.keyFormat = format.id;
                     sectors = Math.min(Math.min(format.sectors, keys.length),
@@ -141,12 +142,12 @@ final class TagReader {
             }
             for (int s = 0; s < sectors && !expired(deadline); s++) {
                 // Sector 0 was just authenticated by the format search.
-                if (s > 0 && !authenticate(mc, s, keys[s], deadline)) {
+                if (s > 0 && !authenticate(mc, s, keys[s], platformTimeout, deadline)) {
                     continue;
                 }
-                byte[] sector = readSector(mc, s);
+                byte[] sector = readSector(mc, s, platformTimeout, deadline);
                 if (sector == null) {
-                    reconnect(mc, deadline);
+                    reconnect(mc, platformTimeout, deadline);
                     continue;
                 }
                 dump.putSector(s, sector);
@@ -179,24 +180,28 @@ final class TagReader {
     }
 
     /** A failed authentication halts the card, so it reconnects before returning false. */
-    private static boolean authenticate(MifareClassic mc, int sector, byte[] key, long deadline) {
+    private static boolean authenticate(MifareClassic mc, int sector, byte[] key,
+                                        int platformTimeout, long deadline) {
         try {
+            bound(mc, platformTimeout, deadline);
             if (mc.authenticateSectorWithKeyA(sector, key)) {
                 return true;
             }
         } catch (IOException e) {
             // Reconnect below.
         }
-        reconnect(mc, deadline);
+        reconnect(mc, platformTimeout, deadline);
         return false;
     }
 
     /** The sector's four blocks, trailer included, or null when a block read fails. */
-    private static byte[] readSector(MifareClassic mc, int sector) {
+    private static byte[] readSector(MifareClassic mc, int sector, int platformTimeout,
+                                     long deadline) {
         byte[] out = new byte[ClassicDump.SECTOR_BYTES];
         int first = mc.sectorToBlock(sector);
         try {
             for (int b = 0; b < CLASSIC_BLOCKS_PER_SECTOR; b++) {
+                bound(mc, platformTimeout, deadline);
                 byte[] block = mc.readBlock(first + b);
                 if (block == null || block.length < MifareClassic.BLOCK_SIZE) {
                     return null;
@@ -217,8 +222,9 @@ final class TagReader {
         PageDump dump = new PageDump(TYPE2_MAX_BYTES);
         try {
             nfcA.connect();
-            bound(nfcA, deadline);
+            int platformTimeout = platformTimeout(nfcA);
             for (int page = 0; page <= TYPE2_LAST_PAGE && !expired(deadline); page += 4) {
+                bound(nfcA, platformTimeout, deadline);
                 byte[] data = nfcA.transceive(new byte[] {TYPE2_READ, (byte) page});
                 if (data == null || data.length < TYPE2_READ_BYTES) {
                     break;
@@ -235,7 +241,8 @@ final class TagReader {
         return pageMemory(KIND_TYPE2, dump);
     }
 
-    /** READ_MULTIPLE_BLOCKS (0x23) addressed with the UID, 32 blocks at a time from block 0. */
+    /** READ_MULTIPLE_BLOCKS (0x23) addressed with the UID, chunks of about 128 bytes (32 blocks when the block size is unknown)
+     * from block 0. */
     private static JSONObject readNfcV(NfcV nfcV, byte[] id, long deadline) {
         PageDump dump = new PageDump(NFCV_MAX_BYTES);
         try {
@@ -244,7 +251,7 @@ final class TagReader {
             int blocks = layout[0];
             int chunk = layout[1] > 0 ? Math.max(1, NFCV_CHUNK_BYTES / layout[1]) : NFCV_DEFAULT_CHUNK_BLOCKS;
             for (int first = 0; first < blocks && !expired(deadline); first += chunk) {
-                    int count = Math.min(chunk, blocks - first);
+                int count = Math.min(chunk, blocks - first);
                 byte[] reply = nfcV.transceive(addressed(NFCV_READ_MULTIPLE_BLOCKS, id,
                         new byte[] {(byte) first, (byte) (count - 1)}));
                 // Byte 0 is the response flags; bit 0 set means an error code follows.
@@ -335,10 +342,29 @@ final class TagReader {
         return System.currentTimeMillis() >= deadline;
     }
 
-    /** Caps one transceive so a stuck tag cannot eat more than the time left (at least 120 ms). */
-    private static void bound(TagTechnology tech, long deadline) {
+    /** The tech's timeout right after connect(): the platform default. */
+    private static int platformTimeout(TagTechnology tech) {
+        try {
+            int timeout = 0;
+            if (tech instanceof MifareClassic) {
+                timeout = ((MifareClassic) tech).getTimeout();
+            } else if (tech instanceof NfcA) {
+                timeout = ((NfcA) tech).getTimeout();
+            }
+            return timeout > 0 ? timeout : Integer.MAX_VALUE;
+        } catch (RuntimeException e) {
+            return Integer.MAX_VALUE;
+        }
+    }
+
+    /**
+     * Caps the next operation at min(platform default, max(120 ms, time left)), so a stuck tag
+     * cannot eat more than the budget and a slow one is never given less than the platform allows.
+     */
+    private static void bound(TagTechnology tech, int platformTimeout, long deadline) {
         long remaining = deadline - System.currentTimeMillis();
-        int timeout = (int) Math.min(Integer.MAX_VALUE, Math.max(MIN_OP_TIMEOUT_MS, remaining));
+        int timeout = (int) Math.min(platformTimeout,
+                Math.min(Integer.MAX_VALUE, Math.max(MIN_OP_TIMEOUT_MS, remaining)));
         try {
             if (tech instanceof MifareClassic) {
                 ((MifareClassic) tech).setTimeout(timeout);
@@ -347,15 +373,15 @@ final class TagReader {
             }
             // NfcV has no setTimeout: its transceive keeps the platform default.
         } catch (RuntimeException e) {
-            // Keep the platform default.
+            // Keep the current timeout.
         }
     }
 
-    private static void reconnect(MifareClassic mc, long deadline) {
+    private static void reconnect(MifareClassic mc, int platformTimeout, long deadline) {
         try {
             mc.close();
             mc.connect();
-            bound(mc, deadline);
+            bound(mc, platformTimeout, deadline);
         } catch (IOException e) {
             // The next call on mc fails and that sector is marked unreadable.
         }
