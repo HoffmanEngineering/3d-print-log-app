@@ -34,12 +34,21 @@
   // would silently orphan every listener the page had already registered.
   var previous = global.PrintLogNative;
   var listeners = (previous && previous.__listeners) || { tap: [], tag: [], nfc: [] };
+  // A shim from before tag reading signals had no reading list.
+  listeners.reading = listeners.reading || [];
   var tapListeners = listeners.tap;
   var tagListeners = listeners.tag;
   var nfcListeners = listeners.nfc;
+  var readingListeners = listeners.reading;
 
   var NFC_STATUSES = ['unsupported', 'off', 'ready'];
   var TAG_TECHS = ['nfca', 'nfcb', 'nfcf', 'nfcv'];
+  var MEMORY_KINDS = ['classic', 'type2', 'nfcv'];
+  var MAX_FORMATS = 8;
+  var MAX_TECHS = 10;
+  var MAX_TECH_LENGTH = 64;
+  var MAX_MEMORY_DATA = 2800;
+  var MAX_UNREADABLE = 16;
 
   host.addEventListener('message', function (event) {
     var reply;
@@ -115,7 +124,90 @@
       return null;
     }
 
-    return { uid: uid, tech: tag.tech };
+    var result = { uid: uid, tech: tag.tech };
+
+    // The rest is optional and each part stands alone: an invalid one is dropped, and the
+    // UID is still delivered.
+    var techs = normalizeTechs(tag.techs);
+    if (techs) {
+      result.techs = techs;
+    }
+    if (tag.classicUnsupported === true) {
+      result.classicUnsupported = true;
+    }
+    var memory = normalizeMemory(tag.memory);
+    if (memory) {
+      result.memory = memory;
+    }
+    return result;
+  }
+
+  function normalizeTechs(techs) {
+    if (!Array.isArray(techs) || techs.length > MAX_TECHS) {
+      return null;
+    }
+    for (var i = 0; i < techs.length; i++) {
+      if (typeof techs[i] !== 'string' || techs[i].length > MAX_TECH_LENGTH) {
+        return null;
+      }
+    }
+    return techs.slice();
+  }
+
+  /**
+   * Raw tag memory is opaque here: the API parses it. The shim only checks the envelope, so
+   * a malformed payload never reaches page code.
+   */
+  function normalizeMemory(memory) {
+    if (!isPlainObject(memory) || MEMORY_KINDS.indexOf(memory.kind) < 0) {
+      return null;
+    }
+    if (typeof memory.data !== 'string' || memory.data.length > MAX_MEMORY_DATA ||
+        !/^[A-Za-z0-9+\/]+={0,2}$/.test(memory.data)) {
+      return null;
+    }
+
+    var result = { kind: memory.kind, data: memory.data };
+
+    if (memory.keyFormat !== undefined && memory.keyFormat !== null) {
+      if (typeof memory.keyFormat !== 'string' || !/^[a-z0-9-]{1,50}$/.test(memory.keyFormat)) {
+        return null;
+      }
+      result.keyFormat = memory.keyFormat;
+    }
+
+    if (memory.unreadable !== undefined && memory.unreadable !== null) {
+      var list = memory.unreadable;
+      if (!Array.isArray(list) || list.length > MAX_UNREADABLE) {
+        return null;
+      }
+      for (var i = 0; i < list.length; i++) {
+        if (typeof list[i] !== 'number' || list[i] % 1 !== 0 || list[i] < 0 || list[i] > 15) {
+          return null;
+        }
+      }
+      result.unreadable = list.slice();
+    }
+    return result;
+  }
+
+  // toString rather than instanceof: the page may hand over an object from another realm.
+  function isPlainObject(value) {
+    return Object.prototype.toString.call(value) === '[object Object]';
+  }
+
+  /** The reader config goes to native only when it has the expected shape. */
+  function validConfig(config) {
+    if (!isPlainObject(config) || !Array.isArray(config.formats) ||
+        config.formats.length > MAX_FORMATS) {
+      return false;
+    }
+    for (var i = 0; i < config.formats.length; i++) {
+      if (!isPlainObject(config.formats[i])) {
+        return false;
+      }
+    }
+    return true;
   }
 
   function nfcStatusOf(reply) {
@@ -200,9 +292,14 @@
       return request('nfcStatus').then(nfcStatusOf);
     },
 
-    /** Starts a reading session. Succeeds even while NFC is off; reading starts when it is on. */
-    startTagReading: function () {
-      return request('startTagReading').then(nfcStatusOf);
+    /**
+     * Starts a reading session. Succeeds even while NFC is off; reading starts when it is on.
+     * The optional config ({ formats: [...] }) says how to read tag memory; without a valid
+     * one native reads the UID only.
+     */
+    startTagReading: function (config) {
+      return request('startTagReading', validConfig(config) ? { config: config } : null)
+        .then(nfcStatusOf);
     },
 
     stopTagReading: function () {
@@ -226,10 +323,22 @@
       }
     },
 
+    /** Fires when a tag has arrived and its memory is being read. */
+    onTagReading: function (listener) {
+      if (typeof listener === 'function') {
+        readingListeners.push(listener);
+      }
+    },
+
     onNfcStatus: function (listener) {
       if (typeof listener === 'function') {
         nfcListeners.push(listener);
       }
+    },
+
+    /** Called by native as soon as a tag arrives, before the read finishes. */
+    signalTagReading: function () {
+      signal(readingListeners);
     },
 
     /** Called by native after storing a tag. */

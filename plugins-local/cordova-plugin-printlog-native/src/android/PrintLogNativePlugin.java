@@ -25,6 +25,7 @@ import com.google.android.gms.tasks.Tasks;
 import com.google.firebase.messaging.FirebaseMessaging;
 
 import org.apache.cordova.CordovaPlugin;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
@@ -37,7 +38,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -107,6 +111,10 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
     // activity is resumed: enableReaderMode requires a resumed activity, and it pauses card
     // emulation (tap-to-pay) for as long as it is on.
 
+    /** Time one tag gets for its memory read. */
+    private static final long TAG_READ_BUDGET_MS = 1500;
+    /** More params than any known scheme uses; a config past it is not ours. */
+    private static final int MAX_PARAMS = 16;
     private static final int READER_FLAGS = NfcAdapter.FLAG_READER_NFC_A
             | NfcAdapter.FLAG_READER_NFC_B
             | NfcAdapter.FLAG_READER_NFC_F
@@ -131,6 +139,8 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
 
     /** The latest tag read, as {uid, tech}. Written on a binder thread, claimed on the UI thread. */
     private final AtomicReference<JSONObject> latestTag = new AtomicReference<>(null);
+    // The session's vetted reader config; null reads the UID only (no config, or a hostile one).
+    private volatile List<ReaderFormat> readerFormats = null;
 
     /**
      * Turning NFC on or off from the Quick Settings shade does not pause the activity, so
@@ -461,10 +471,11 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
     }
 
     @Override
-    public String startTagReading() {
+    public String startTagReading(JSONObject config) {
         // A tag left over from an earlier session belongs to a screen that is gone.
         readSession++;
         latestTag.set(null);
+        readerFormats = readerFormats(config);
         tagReading = true;
         if (resumed) {
             registerNfcStateReceiver();
@@ -477,6 +488,7 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
         readSession++;
         tagReading = false;
         latestTag.set(null);
+        readerFormats = null;
         unregisterNfcStateReceiver();
         applyReaderMode();
     }
@@ -607,11 +619,28 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
     }
 
     /**
-     * Runs on a binder thread. Stores the tag, then buzzes and signals on the UI thread.
-     * Nothing from the tag is put into script: the page claims it with consumeTag.
+     * Runs on the reader-mode thread, not the UI thread: the read takes up to 1.5 s. Tells the
+     * page a tag arrived, reads its memory, then stores the tag, buzzes and signals on the UI
+     * thread. Nothing from the tag is put into script: the page claims it with consumeTag.
      */
     private void onTagDiscovered(Tag tag, int session) {
-        JSONObject read = describeSpoolTag(tag);
+        // The same drop rules (and log line) as ever, before anything is signaled.
+        if (describeSpoolTag(tag) == null) {
+            return;
+        }
+        final List<ReaderFormat> formats = readerFormats;
+
+        cordova.getActivity().runOnUiThread(() -> {
+            if (session != readSession) {
+                return;
+            }
+            ((WebView) webView.getView()).evaluateJavascript(
+                    "window.PrintLogNative && window.PrintLogNative.signalTagReading"
+                            + " && window.PrintLogNative.signalTagReading();",
+                    null);
+        });
+
+        JSONObject read = TagReader.read(tag, formats, TAG_READ_BUDGET_MS);
         if (read == null) {
             return;
         }
@@ -634,6 +663,52 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
                             + " && window.PrintLogNative.signalTag();",
                     null);
         });
+    }
+
+    /**
+     * Vets the page's reader config. Anything malformed, oversized or entirely rejected gives
+     * null (UID only); entries that break the caps are dropped by {@link ReaderConfig}. Never
+     * logs the config.
+     */
+    private static List<ReaderFormat> readerFormats(JSONObject config) {
+        if (config == null) {
+            return null;
+        }
+        JSONArray entries = config.optJSONArray("formats");
+        if (entries == null || entries.length() > ReaderConfig.MAX_FORMATS) {
+            return null;
+        }
+        List<ReaderFormat> candidates = new ArrayList<ReaderFormat>();
+        for (int i = 0; i < entries.length(); i++) {
+            JSONObject entry = entries.optJSONObject(i);
+            if (entry == null) {
+                continue;
+            }
+            Object id = entry.opt("id");
+            Object scheme = entry.opt("scheme");
+            JSONObject params = entry.optJSONObject("params");
+            if (!(id instanceof String) || !(scheme instanceof String) || params == null
+                    || params.length() > MAX_PARAMS) {
+                continue;
+            }
+            Map<String, String> values = new HashMap<String, String>();
+            boolean valid = true;
+            Iterator<String> keys = params.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                Object value = params.opt(key);
+                if (!(value instanceof String)) {
+                    valid = false;
+                    break;
+                }
+                values.put(key, (String) value);
+            }
+            if (valid) {
+                candidates.add(ReaderConfig.format((String) id, (String) scheme, values));
+            }
+        }
+        List<ReaderFormat> formats = ReaderConfig.formats(candidates);
+        return formats.isEmpty() ? null : formats;
     }
 
     /**
