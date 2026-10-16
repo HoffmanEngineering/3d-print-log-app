@@ -122,9 +122,9 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
     /**
      * Bumped on every start and stop. Each reader callback carries the value it was enabled
      * under, so a read still in flight on a binder thread when one screen hands over to the
-     * next is dropped instead of landing in the new session.
+     * next is dropped instead of landing in the new session. UI thread only.
      */
-    private volatile int readSession;
+    private int readSession;
 
     /** Whether the activity is between onResume and onPause. UI thread only. */
     private boolean resumed;
@@ -615,15 +615,16 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
         if (read == null) {
             return;
         }
-        if (session != readSession) {
-            Log.d(TAG, "Tag read for a session that has ended; dropped.");
-            return;
-        }
-
-        Log.d(TAG, "Tag read: " + read.optString("tech"));
-        latestTag.set(read);
-
+        // The session check and the store run on the UI thread, where start and stop run, so a
+        // handover between them can't slip in after the check and receive this screen's tag.
         cordova.getActivity().runOnUiThread(() -> {
+            if (session != readSession) {
+                Log.d(TAG, "Tag read for a session that has ended; dropped.");
+                return;
+            }
+            Log.d(TAG, "Tag read: " + read.optString("tech"));
+            latestTag.set(read);
+
             WebView view = (WebView) webView.getView();
             view.performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
                     ? HapticFeedbackConstants.CONFIRM
