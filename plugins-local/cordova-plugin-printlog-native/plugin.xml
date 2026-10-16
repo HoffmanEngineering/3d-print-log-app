@@ -31,6 +31,10 @@
                      target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
         <source-file src="src/android/SpoolTagRules.java"
                      target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
+        <source-file src="src/android/ReaderConfig.java"
+                     target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
+        <source-file src="src/android/ReaderFormat.java"
+                     target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
         <source-file src="src/android/TagKeySchemes.java"
                      target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
 
