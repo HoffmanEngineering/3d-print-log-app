@@ -29,6 +29,8 @@
                      target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
         <source-file src="src/android/PrintLogBridgeRouter.java"
                      target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
+        <source-file src="src/android/SpoolTagRules.java"
+                     target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
 
         <asset src="www/printlog-native.js" target="printlog-native.js" />
 

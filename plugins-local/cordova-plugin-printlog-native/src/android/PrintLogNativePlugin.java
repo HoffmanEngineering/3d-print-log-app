@@ -116,10 +116,15 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
             // feedback, and it fires only for a tag we keep.
             | NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS;
 
-    private static final String TECH_ISO_DEP = "android.nfc.tech.IsoDep";
-
     /** Whether the page has an open reading session. UI thread only. */
     private boolean tagReading;
+
+    /**
+     * Bumped on every start and stop. Each reader callback carries the value it was enabled
+     * under, so a read still in flight on a binder thread when one screen hands over to the
+     * next is dropped instead of landing in the new session.
+     */
+    private volatile int readSession;
 
     /** Whether the activity is between onResume and onPause. UI thread only. */
     private boolean resumed;
@@ -447,23 +452,29 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
         if (adapter == null) {
             return "unsupported";
         }
+        // A backstop for the state receiver: whenever the page asks, bring reader mode in line
+        // with what it is about to be told.
+        if (tagReading) {
+            applyReaderMode();
+        }
         return adapter.isEnabled() ? "ready" : "off";
     }
 
     @Override
     public String startTagReading() {
         // A tag left over from an earlier session belongs to a screen that is gone.
+        readSession++;
         latestTag.set(null);
         tagReading = true;
         if (resumed) {
             registerNfcStateReceiver();
         }
-        applyReaderMode();
         return nfcStatus();
     }
 
     @Override
     public void stopTagReading() {
+        readSession++;
         tagReading = false;
         latestTag.set(null);
         unregisterNfcStateReceiver();
@@ -544,7 +555,9 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
         Activity activity = cordova.getActivity();
         try {
             if (tagReading && resumed && adapter.isEnabled()) {
-                adapter.enableReaderMode(activity, this::onTagDiscovered, READER_FLAGS, null);
+                final int session = readSession;
+                adapter.enableReaderMode(
+                        activity, tag -> onTagDiscovered(tag, session), READER_FLAGS, null);
             } else {
                 adapter.disableReaderMode(activity);
             }
@@ -571,12 +584,14 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
             }
         };
 
-        // Not exported: ACTION_ADAPTER_STATE_CHANGED is a system broadcast, which still reaches
-        // a not-exported receiver, and no other app has any business sending it to us.
+        // Exported: the NFC service sends ACTION_ADAPTER_STATE_CHANGED from its own UID, not
+        // the system's, and a not-exported receiver only hears the system UID. It is a
+        // protected broadcast, so no other app can send it, and the receiver only re-reads
+        // the adapter's state either way.
         ContextCompat.registerReceiver(
                 cordova.getActivity(), nfcStateReceiver,
                 new IntentFilter(NfcAdapter.ACTION_ADAPTER_STATE_CHANGED),
-                ContextCompat.RECEIVER_NOT_EXPORTED);
+                ContextCompat.RECEIVER_EXPORTED);
     }
 
     private void unregisterNfcStateReceiver() {
@@ -595,12 +610,17 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
      * Runs on a binder thread. Stores the tag, then buzzes and signals on the UI thread.
      * Nothing from the tag is put into script: the page claims it with consumeTag.
      */
-    private void onTagDiscovered(Tag tag) {
+    private void onTagDiscovered(Tag tag, int session) {
         JSONObject read = describeSpoolTag(tag);
         if (read == null) {
             return;
         }
+        if (session != readSession) {
+            Log.d(TAG, "Tag read for a session that has ended; dropped.");
+            return;
+        }
 
+        Log.d(TAG, "Tag read: " + read.optString("tech"));
         latestTag.set(read);
 
         cordova.getActivity().runOnUiThread(() -> {
@@ -617,66 +637,29 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
 
     /**
      * @return {uid, tech} for a tag that could be on a spool, or null for one to drop
-     *         silently: ISO-DEP tags (payment, transit and ID cards, and phones; spool tags
-     *         are MIFARE Classic, NTAG or ISO 15693, never ISO-DEP) and NFC-A random IDs,
-     *         which change on every read.
+     *         silently (no buzz, no signal). The rules live in {@link SpoolTagRules}.
      */
     static JSONObject describeSpoolTag(Tag tag) {
         if (tag == null) {
             return null;
         }
 
-        List<String> techs = Arrays.asList(tag.getTechList());
-        if (techs.contains(TECH_ISO_DEP)) {
-            return null;
-        }
-
-        String tech;
-        if (techs.contains("android.nfc.tech.NfcV")) {
-            tech = "nfcv";
-        } else if (techs.contains("android.nfc.tech.NfcA")) {
-            tech = "nfca";
-        } else if (techs.contains("android.nfc.tech.NfcB")) {
-            tech = "nfcb";
-        } else if (techs.contains("android.nfc.tech.NfcF")) {
-            tech = "nfcf";
-        } else {
-            return null;
-        }
-
+        String[] techs = tag.getTechList();
         byte[] id = tag.getId();
-        if (id == null || id.length == 0) {
-            return null;
-        }
-
-        // ISO 14443-3: a 4-byte UID starting 0x08 is a random ID, new on every read.
-        if ("nfca".equals(tech) && id.length == 4 && (id[0] & 0xFF) == 0x08) {
+        String tech = SpoolTagRules.spoolTech(techs, id);
+        if (tech == null) {
+            Log.d(TAG, "Tag dropped: " + SpoolTagRules.dropReason(techs, id));
             return null;
         }
 
         try {
             JSONObject json = new JSONObject();
-            json.put("uid", hexUid(id, "nfcv".equals(tech)));
+            json.put("uid", SpoolTagRules.uid(id, tech));
             json.put("tech", tech);
             return json;
         } catch (Exception e) {
             return null;
         }
-    }
-
-    /**
-     * Uppercase hex with no separators, as TagUid.Normalize stores it. Android returns an
-     * ISO 15693 UID least significant byte first; reversed, it reads in the printed E0... order
-     * that OpenPrintTag readers report.
-     */
-    static String hexUid(byte[] id, boolean reverse) {
-        StringBuilder hex = new StringBuilder(id.length * 2);
-        for (int i = 0; i < id.length; i++) {
-            byte b = id[reverse ? id.length - 1 - i : i];
-            hex.append(Character.toUpperCase(Character.forDigit((b >> 4) & 0xF, 16)));
-            hex.append(Character.toUpperCase(Character.forDigit(b & 0xF, 16)));
-        }
-        return hex.toString();
     }
 
     private void signalNfcStatus() {
