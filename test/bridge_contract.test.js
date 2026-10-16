@@ -495,3 +495,20 @@ test('consumeTag without the new fields returns just uid and tech', async () => 
     const tag = await consume({ uid: '04A23F11', tech: 'nfca' });
     assert.equal(JSON.stringify(tag), JSON.stringify({ uid: '04A23F11', tech: 'nfca' }));
 });
+
+test('a request whose message cannot be serialized rejects and leaves nothing pending', async () => {
+    const { bridge, posted, reply } = installShim();
+    const hostile = {
+        toJSON() {
+            throw new Error('boom');
+        }
+    };
+    await assert.rejects(bridge.registerForPush(hostile), /boom/);
+    assert.equal(posted.length, 0, 'nothing was posted');
+
+    // The bridge still works, and ids stay correlated.
+    const next = bridge.registerForPush('bearer-ok');
+    assert.equal(posted.length, 1);
+    reply(0, { ok: true });
+    assert.equal((await next).ok, true);
+});

@@ -75,9 +75,15 @@
       }
     }
 
-    return new Promise(function (resolve) {
+    return new Promise(function (resolve, reject) {
       pending[id] = resolve;
-      host.postMessage(JSON.stringify(message));
+      try {
+        host.postMessage(JSON.stringify(message));
+      } catch (e) {
+        // A hostile toJSON or getter in the payload: no entry may leak.
+        delete pending[id];
+        reject(e);
+      }
     });
   }
 
