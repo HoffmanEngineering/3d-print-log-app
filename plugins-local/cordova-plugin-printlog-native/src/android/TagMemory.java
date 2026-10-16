@@ -7,6 +7,7 @@ package com.hoffmanengineering.printlog;
  * classic sectors putCsv unreadableCsv: puts sector s filled with byte s+1 for each s in
  *   putCsv, marks each sector in unreadableCsv, then prints "length N", "unreadable a,b,c" and
  *   "first-bytes" with the first byte of every sector as two hex digits.
+ *   A fifth argument "again" puts the unreadable sectors back after marking them.
  * page maxBytes chunkSize chunks: adds chunks of chunkSize bytes (chunk i filled with i+1) and
  *   prints the add results as "true,true,false" then "length N".
  */
@@ -16,7 +17,7 @@ final class TagMemory {
 
     public static void main(String[] args) {
         if ("classic".equals(args[0])) {
-            classic(Integer.parseInt(args[1]), ints(args[2]), ints(args[3]));
+            classic(Integer.parseInt(args[1]), ints(args[2]), ints(args[3]), args.length > 4 && "again".equals(args[4]));
         } else if ("page".equals(args[0])) {
             page(Integer.parseInt(args[1]), Integer.parseInt(args[2]), Integer.parseInt(args[3]));
         } else {
@@ -24,7 +25,7 @@ final class TagMemory {
         }
     }
 
-    private static void classic(int sectors, int[] put, int[] unreadable) {
+    private static void classic(int sectors, int[] put, int[] unreadable, boolean putAgain) {
         ClassicDump dump = new ClassicDump(sectors);
         for (int s : put) {
             byte[] data = new byte[ClassicDump.SECTOR_BYTES];
@@ -33,6 +34,13 @@ final class TagMemory {
         }
         for (int s : unreadable) {
             dump.markUnreadable(s);
+        }
+        if (putAgain) {
+            for (int s : unreadable) {
+                byte[] data = new byte[ClassicDump.SECTOR_BYTES];
+                java.util.Arrays.fill(data, (byte) (s + 1));
+                dump.putSector(s, data);
+            }
         }
         byte[] bytes = dump.bytes();
         System.out.println("length " + bytes.length);

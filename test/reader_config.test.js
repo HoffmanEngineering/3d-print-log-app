@@ -1,56 +1,16 @@
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 const test = require('node:test');
-
-const pluginDir = path.join(__dirname, '..', 'plugins-local', 'cordova-plugin-printlog-native');
-const javaDir = path.join(pluginDir, 'src', 'android');
-
-/** javac from JAVA_HOME, else from PATH; null when neither has one. */
-function findJavac() {
-    const candidates = [];
-    if (process.env.JAVA_HOME) {
-        candidates.push(path.join(process.env.JAVA_HOME, 'bin', 'javac'));
-    }
-    candidates.push('javac');
-    for (const javac of candidates) {
-        const probe = spawnSync(javac, ['-version'], { encoding: 'utf8' });
-        if (probe.status === 0) {
-            return javac;
-        }
-    }
-    return null;
-}
+const { findJavac, compile, runJava } = require('./helpers/javac');
 
 const javac = findJavac();
 let classesDir;
 
 /** Runs ReaderConfig.main: one "ok <id>" or "drop" per input line. */
-function validate(...lines) {
+function validate(...args) {
     if (!classesDir) {
-        classesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'reader-config-'));
-        const compiled = spawnSync(
-            javac,
-            [
-                '-d', classesDir,
-                path.join(javaDir, 'TagKeySchemes.java'),
-                path.join(javaDir, 'ReaderFormat.java'),
-                path.join(javaDir, 'ReaderConfig.java'),
-            ],
-            { encoding: 'utf8' }
-        );
-        assert.equal(compiled.status, 0, compiled.stderr);
+        classesDir = compile(['TagKeySchemes.java', 'ReaderFormat.java', 'ReaderConfig.java']);
     }
-    const java = path.join(path.dirname(javac), process.platform === 'win32' ? 'java.exe' : 'java');
-    const run = spawnSync(
-        fs.existsSync(java) ? java : 'java',
-        ['-cp', classesDir, 'com.hoffmanengineering.printlog.ReaderConfig', ...lines],
-        { encoding: 'utf8' }
-    );
-    assert.equal(run.status, 0, run.stderr);
-    return run.stdout.trim().split(/\r?\n/);
+    return runJava(classesDir, 'ReaderConfig', args).split(/\r?\n/);
 }
 
 const skip = javac ? false : 'no javac (CI installs a JDK with setup-java)';
@@ -129,4 +89,36 @@ test('nine valid formats keep eight', { skip }, () => {
 
 test('a repeated id is dropped and the first one wins', { skip }, () => {
     assert.deepEqual(validate(hmac('same'), hkdf('same')), ['ok same', 'drop']);
+});
+
+test('a huge or non-numeric sectors string is dropped', { skip }, () => {
+    assert.deepEqual(
+        validate(
+            hmac('a', `;sectors=${'9'.repeat(300)}`),
+            hmac('b', ';sectors=99999999999'),
+            hmac('c', ';sectors=1.5'),
+            hmac('d', ';sectors=-1'),
+            hmac('e', ';sectors=')
+        ),
+        ['drop', 'drop', 'drop', 'drop', 'drop']
+    );
+});
+
+test('a labelPrefix with non-ASCII or control characters is dropped', { skip }, () => {
+    assert.deepEqual(
+        validate(
+            `a|hmac-sha256-sector|saltHex=${SALT};labelPrefix=key_é_`,
+            `b|hmac-sha256-sector|saltHex=${SALT};labelPrefix=key_\u0001_`,
+            `c|hmac-sha256-sector|saltHex=${SALT};labelPrefix=key_\u007f_`,
+            `d|hmac-sha256-sector|saltHex=${SALT};labelPrefix=`
+        ),
+        ['drop', 'drop', 'drop', 'drop']
+    );
+});
+
+test('any over-long param value drops the format, even an unknown param', { skip }, () => {
+    assert.deepEqual(
+        validate(hmac('a', `;extra=${'x'.repeat(257)}`), hmac('b', `;extra=${'x'.repeat(256)}`)),
+        ['drop', 'ok b']
+    );
 });

@@ -1,28 +1,6 @@
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 const test = require('node:test');
-
-const pluginDir = path.join(__dirname, '..', 'plugins-local', 'cordova-plugin-printlog-native');
-const javaDir = path.join(pluginDir, 'src', 'android');
-
-/** javac from JAVA_HOME, else from PATH; null when neither has one. */
-function findJavac() {
-    const candidates = [];
-    if (process.env.JAVA_HOME) {
-        candidates.push(path.join(process.env.JAVA_HOME, 'bin', 'javac'));
-    }
-    candidates.push('javac');
-    for (const javac of candidates) {
-        const probe = spawnSync(javac, ['-version'], { encoding: 'utf8' });
-        if (probe.status === 0) {
-            return javac;
-        }
-    }
-    return null;
-}
+const { findJavac, compile, runJava } = require('./helpers/javac');
 
 const javac = findJavac();
 let classesDir;
@@ -30,28 +8,9 @@ let classesDir;
 /** Runs TagMemory.main and returns its output lines. */
 function run(...args) {
     if (!classesDir) {
-        classesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tag-memory-'));
-        const compiled = spawnSync(
-            javac,
-            [
-                '-d', classesDir,
-                path.join(javaDir, 'TagKeySchemes.java'),
-                path.join(javaDir, 'ClassicDump.java'),
-                path.join(javaDir, 'PageDump.java'),
-                path.join(javaDir, 'TagMemory.java'),
-            ],
-            { encoding: 'utf8' }
-        );
-        assert.equal(compiled.status, 0, compiled.stderr);
+        classesDir = compile(['TagKeySchemes.java', 'ClassicDump.java', 'PageDump.java', 'TagMemory.java']);
     }
-    const java = path.join(path.dirname(javac), process.platform === 'win32' ? 'java.exe' : 'java');
-    const result = spawnSync(
-        fs.existsSync(java) ? java : 'java',
-        ['-cp', classesDir, 'com.hoffmanengineering.printlog.TagMemory', ...args],
-        { encoding: 'utf8' }
-    );
-    assert.equal(result.status, 0, result.stderr);
-    return result.stdout.trim().split(/\r?\n/);
+    return runJava(classesDir, 'TagMemory', args).split(/\r?\n/);
 }
 
 const skip = javac ? false : 'no javac (CI installs a JDK with setup-java)';
@@ -86,4 +45,10 @@ test('a page dump cuts a chunk that crosses the cap', { skip }, () => {
     const out = run('page', '20', '16', '2');
     assert.equal(out[0], 'true,false');
     assert.equal(out[1], 'length 20');
+});
+
+test('putSector after markUnreadable clears the mark', { skip }, () => {
+    const out = run('classic', '4', '1', '1', 'again');
+    assert.equal(out[1].trim(), 'unreadable');
+    assert.equal(out[2], 'first-bytes 00,02,00,00');
 });

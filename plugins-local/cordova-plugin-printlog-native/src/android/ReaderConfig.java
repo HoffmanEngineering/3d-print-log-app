@@ -31,7 +31,7 @@ final class ReaderConfig {
     /**
      * @return the format, or null when anything breaks the caps: unknown scheme, bad id, a
      *         missing or non-hex or odd-length saltHex or infoHex, a missing or non-ASCII
-     *         labelPrefix, a value over 256 characters, or sectors outside 1-16 (default 16).
+     *         labelPrefix, any param value (known or not) over 256 characters, or sectors outside 1-16 (default 16).
      */
     static ReaderFormat format(String id, String scheme, Map<String, String> params) {
         if (id == null || !ID.matcher(id).matches() || params == null) {
@@ -40,6 +40,12 @@ final class ReaderConfig {
         boolean hmac = SCHEME_HMAC.equals(scheme);
         if (!hmac && !SCHEME_HKDF.equals(scheme)) {
             return null;
+        }
+
+        for (String value : params.values()) {
+            if (value == null || value.length() > MAX_VALUE_LENGTH) {
+                return null;
+            }
         }
 
         byte[] salt = hexParam(params.get("saltHex"));
