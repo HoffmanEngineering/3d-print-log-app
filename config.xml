@@ -21,6 +21,10 @@
         <config-file target="AndroidManifest.xml" parent="/*">
             <uses-permission android:name="android.permission.CAMERA" />
             <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+            <!-- NFC spool tags. A normal permission (no prompt); required="false" so Play still
+                 offers the app to phones without NFC. -->
+            <uses-permission android:name="android.permission.NFC" />
+            <uses-feature android:name="android.hardware.nfc" android:required="false" />
         </config-file>
     </platform>
     <platform name="ios">

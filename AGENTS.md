@@ -223,6 +223,44 @@ Firebase credentials — the client `google-services.json` and the API's service
 which are different credentials with different handling — are covered in
 `docs/firebase-setup.md`.
 
+## NFC Spool Tags
+
+The same plugin reads the UID of a spool's RFID/NFC tag for the UI's filament picker, the
+material page's tag field and the Materials list's Scan spool sheet. Design:
+`docs/superpowers/specs/2026-10-15-nfc-filament-tags-design.md` (local, not committed).
+
+- **A session, not a toggle.** The page calls `startTagReading` when a screen starts listening
+  and `stopTagReading` when the last one stops (the UI's `TagReaderService` counts listeners).
+  Reader mode is on only while a session is open, NFC is on and the activity is resumed:
+  `onResume` enables it, `onPause` disables it, and a receiver for
+  `NfcAdapter.ACTION_ADAPTER_STATE_CHANGED` catches NFC being toggled from Quick Settings,
+  which does not pause the activity. That receiver is **exported** on purpose: the NFC service
+  sends the broadcast from its own UID, not the system's, so a `RECEIVER_NOT_EXPORTED`
+  receiver never hears it. Every `nfcStatus` call also re-applies reader mode as a backstop.
+  Reader mode also pauses tap-to-pay while it is on.
+- **The five NFC actions run on the UI thread, in posting order.** Push actions go to
+  `cordova.getThreadPool()`, which is multi-threaded, so a `stopTagReading` sent just before a
+  `startTagReading` (one screen closing as another opens) could run last there and leave the
+  reader off. `PrintLogBridgeRouter.UI_THREAD_ACTIONS` is the one list of them, and
+  `test/spool_tag_rules.test.js` fails when it and the shim's NFC requests disagree. Each start
+  and stop also bumps a session counter the reader callback carries, so a read still in flight
+  from the previous screen is dropped.
+- **Every full page load ends the session** (`onPageFinished`, before the shim is injected), so
+  a reload never leaves reader mode on with nothing listening.
+- **Signal-then-fetch, like taps.** Native stores the latest tag, buzzes the WebView
+  (`performHapticFeedback`, no `VIBRATE` permission) and calls `signalTag()`; the page claims it
+  with `consumeTag()`. The shim accepts only uppercase hex, whole bytes, at most 64 digits, and
+  `tech` in `nfca`/`nfcb`/`nfcf`/`nfcv`.
+- **Dropped silently, before the buzz:** ISO-DEP tags (payment and transit cards, phones) and
+  NFC-A 4-byte UIDs starting `0x08` (random IDs). Platform sounds are off for the same reason.
+- **NFC-V UIDs are byte-reversed** so they read in the printed `E0…` order, the same UID
+  printer-side readers report. These rules live in `SpoolTagRules.java`, which has no Android
+  imports so `test/spool_tag_rules.test.js` can compile and run it with `javac` (skipped when
+  there is no JDK; CI has one). Drops and reads log the reason or the tech to logcat, never the UID.
+- **The shim is idempotent** and dispatches `printlog-native-ready` on `window`. It usually
+  lands after Angular boots, so the UI recomputes "can read tags" on that event. Feature
+  detection is the presence of `startTagReading`, never the user agent.
+
 ## iOS Build Notes
 
 **iOS has never been built or shipped.** `azure-pipelines-ios.yml` and

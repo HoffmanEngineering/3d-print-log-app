@@ -4,7 +4,8 @@
         version="1.0.0">
     <name>PrintLog Native Bridge</name>
     <description>
-        Origin-restricted native bridge for push registration and notification taps.
+        Origin-restricted native bridge for push registration, notification taps and NFC
+        spool tag reading.
         Exists because cordova.js is unavailable once the WebView navigates to the remote
         site, so the Angular app cannot reach plugins the normal way.
     </description>
@@ -27,6 +28,8 @@
         <source-file src="src/android/PrintLogNativePlugin.java"
                      target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
         <source-file src="src/android/PrintLogBridgeRouter.java"
+                     target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
+        <source-file src="src/android/SpoolTagRules.java"
                      target-dir="app/src/main/java/com/hoffmanengineering/printlog" />
 
         <asset src="www/printlog-native.js" target="printlog-native.js" />
