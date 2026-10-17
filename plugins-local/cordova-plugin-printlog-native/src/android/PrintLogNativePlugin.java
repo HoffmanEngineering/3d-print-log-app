@@ -12,6 +12,9 @@ import android.nfc.NfcAdapter;
 import android.nfc.Tag;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.os.VibratorManager;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.HapticFeedbackConstants;
@@ -74,6 +77,10 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
             Collections.singleton("https://www.3dprintlog.com");
 
     private static final String BRIDGE_OBJECT = "PrintLogNativeHost";
+
+    /** Off/on pairs in ms for the read-tag buzz: two 50 ms pulses, 70 ms apart. */
+    private static final long[] SCAN_BUZZ_TIMINGS_MS = {0, 50, 70, 50};
+    private static final int[] SCAN_BUZZ_AMPLITUDES = {0, 255, 0, 255};
 
     /** FCM data keys, set by the API's PushDispatchService. */
     private static final String KEY_NOTIFICATION_ID = "notificationId";
@@ -655,14 +662,49 @@ public class PrintLogNativePlugin extends CordovaPlugin implements PrintLogBridg
             latestTag.set(read);
 
             WebView view = (WebView) webView.getView();
-            view.performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                    ? HapticFeedbackConstants.CONFIRM
-                    : HapticFeedbackConstants.LONG_PRESS);
+            buzzForTag(view);
             view.evaluateJavascript(
                     "window.PrintLogNative && window.PrintLogNative.signalTag"
                             + " && window.PrintLogNative.signalTag();",
                     null);
         });
+    }
+
+    /**
+     * Two firm pulses for a read tag. The system CONFIRM haptic is a light tick, too faint to notice
+     * while holding a phone against a spool. Falls back to that tick on a phone with no vibrator,
+     * or if the VIBRATE permission is missing.
+     */
+    @SuppressWarnings("deprecation")
+    private void buzzForTag(WebView view) {
+        try {
+            Vibrator vibrator = vibrator();
+            if (vibrator != null && vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator.vibrate(vibrator.hasAmplitudeControl()
+                            ? VibrationEffect.createWaveform(SCAN_BUZZ_TIMINGS_MS, SCAN_BUZZ_AMPLITUDES, -1)
+                            : VibrationEffect.createWaveform(SCAN_BUZZ_TIMINGS_MS, -1));
+                } else {
+                    vibrator.vibrate(SCAN_BUZZ_TIMINGS_MS, -1);
+                }
+                return;
+            }
+        } catch (SecurityException e) {
+            Log.w(TAG, "No VIBRATE permission; using the haptic tick.");
+        }
+        view.performHapticFeedback(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? HapticFeedbackConstants.CONFIRM
+                : HapticFeedbackConstants.LONG_PRESS);
+    }
+
+    @SuppressWarnings("deprecation")
+    private Vibrator vibrator() {
+        Context context = cordova.getContext();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            VibratorManager manager = context.getSystemService(VibratorManager.class);
+            return manager == null ? null : manager.getDefaultVibrator();
+        }
+        return (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
     }
 
     /**

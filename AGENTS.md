@@ -247,8 +247,9 @@ material page's tag field and the Materials list's Scan spool sheet. Design:
   from the previous screen is dropped.
 - **Every full page load ends the session** (`onPageFinished`, before the shim is injected), so
   a reload never leaves reader mode on with nothing listening.
-- **Signal-then-fetch, like taps.** Native stores the latest tag, buzzes the WebView
-  (`performHapticFeedback`, no `VIBRATE` permission) and calls `signalTag()`; the page claims it
+- **Signal-then-fetch, like taps.** Native stores the latest tag, buzzes (two 50 ms pulses through
+  `Vibrator`, which needs the install-time `VIBRATE` permission; the `CONFIRM` haptic tick it falls
+  back to was too faint to notice against a spool) and calls `signalTag()`; the page claims it
   with `consumeTag()`. The shim accepts only uppercase hex, whole bytes, at most 64 digits, and
   `tech` in `nfca`/`nfcb`/`nfcf`/`nfcv`.
 - **Memory reading is opt-in per session.** `startTagReading(config)` takes the reader config

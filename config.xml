@@ -24,6 +24,8 @@
             <!-- NFC spool tags. A normal permission (no prompt); required="false" so Play still
                  offers the app to phones without NFC. -->
             <uses-permission android:name="android.permission.NFC" />
+            <!-- The buzz when a spool tag is read. Also a normal permission, granted at install. -->
+            <uses-permission android:name="android.permission.VIBRATE" />
             <uses-feature android:name="android.hardware.nfc" android:required="false" />
         </config-file>
     </platform>
