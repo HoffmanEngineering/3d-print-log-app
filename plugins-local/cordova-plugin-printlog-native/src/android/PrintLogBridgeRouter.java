@@ -46,16 +46,18 @@ public class PrintLogBridgeRouter {
          * Starts a tag-reading session: clears any stored tag and sets the reading flag. Reader
          * mode itself turns on only while NFC is on and the activity is in front.
          *
+         * @param config the page's reader config ({@code {formats: [...]}}), or null when it sent
+         *               none: then only the UID is read. Untrusted; the implementation vets it.
          * @return the NFC status, as {@link #nfcStatus()}.
          */
-        String startTagReading();
+        String startTagReading(JSONObject config);
 
         /** Ends the session: clears the flag and the stored tag, and turns reader mode off. */
         void stopTagReading();
 
         /**
-         * @return the latest tag as {@code {uid, tech}}, claimed once, or null. Validation is
-         *         the shim's job, as for taps.
+         * @return the latest tag as {@code {uid, tech, techs, classicUnsupported?, memory?}},
+         *         claimed once, or null. Validation is the shim's job, as for taps.
          */
         JSONObject consumeTag();
 
@@ -127,7 +129,7 @@ public class PrintLogBridgeRouter {
                 reply.put("nfc", actions.nfcStatus());
             } else if ("startTagReading".equals(action)) {
                 reply.put("ok", true);
-                reply.put("nfc", actions.startTagReading());
+                reply.put("nfc", actions.startTagReading(request.optJSONObject("config")));
             } else if ("stopTagReading".equals(action)) {
                 actions.stopTagReading();
                 reply.put("ok", true);

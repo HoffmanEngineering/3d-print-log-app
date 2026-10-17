@@ -334,3 +334,181 @@ test('a second injection keeps the listeners already registered', () => {
 
     assert.deepEqual(fired, ['tag', 'nfc', 'tap']);
 });
+
+// ---- Tag memory reading ----
+
+const FORMAT = {
+    id: 'vendor-a',
+    scheme: 'hmac-sha256-sector',
+    params: { saltHex: '00112233445566778899AABBCCDDEEFF', labelPrefix: 'x' }
+};
+
+test('startTagReading sends the reader config when it has a formats array', () => {
+    const { bridge, posted } = installShim();
+    bridge.startTagReading({ formats: [FORMAT] });
+
+    assert.equal(posted[0].action, 'startTagReading');
+    assert.equal(JSON.stringify(posted[0].config), JSON.stringify({ formats: [FORMAT] }));
+});
+
+test('startTagReading sends no config unless it is a plain object with up to 8 format objects', () => {
+    const bad = [
+        undefined, null, 'x', 42, [], [FORMAT], {}, { formats: 'x' }, { formats: {} },
+        { formats: [FORMAT, 'x'] }, { formats: [FORMAT, null] }, { formats: [FORMAT, [1]] },
+        { formats: new Array(9).fill(FORMAT) }
+    ];
+    for (const config of bad) {
+        const { bridge, posted } = installShim();
+        bridge.startTagReading(config);
+        assert.equal(posted[0].action, 'startTagReading');
+        assert.ok(!('config' in posted[0]), `sent ${JSON.stringify(config)}`);
+    }
+});
+
+test('startTagReading accepts 8 formats and an empty list', () => {
+    for (const formats of [new Array(8).fill(FORMAT), []]) {
+        const { bridge, posted } = installShim();
+        bridge.startTagReading({ formats });
+        assert.equal(posted[0].config.formats.length, formats.length);
+    }
+});
+
+test('signalTagReading runs every reading listener even if one throws', () => {
+    const { bridge } = installShim();
+    const fired = [];
+
+    assert.equal(typeof bridge.onTagReading, 'function');
+    assert.equal(typeof bridge.signalTagReading, 'function');
+    bridge.onTagReading(() => { throw new Error('page bug'); });
+    bridge.onTagReading(() => fired.push('b'));
+    bridge.onTagReading('not a function');
+
+    assert.doesNotThrow(() => bridge.signalTagReading());
+    assert.deepEqual(fired, ['b']);
+});
+
+test('a second injection keeps the reading listeners', () => {
+    const first = installShim();
+    const fired = [];
+    first.bridge.onTagReading(() => fired.push('reading'));
+
+    installShim(first).bridge.signalTagReading();
+
+    assert.deepEqual(fired, ['reading']);
+});
+
+const CLASSIC_MEMORY = {
+    kind: 'classic',
+    data: 'A'.repeat(1368),
+    keyFormat: 'vendor-a',
+    unreadable: [3, 15]
+};
+
+async function consume(tag) {
+    const { bridge, reply } = installShim();
+    const pending = bridge.consumeTag();
+    reply(0, { ok: true, tag });
+    return pending;
+}
+
+test('consumeTag passes techs, classicUnsupported and a valid memory through unchanged', async () => {
+    const tag = await consume({
+        uid: '04A23F11', tech: 'nfca', techs: ['android.nfc.tech.NfcA'],
+        classicUnsupported: true, memory: CLASSIC_MEMORY
+    });
+
+    assert.equal(tag.uid, '04A23F11');
+    assert.equal(tag.tech, 'nfca');
+    assert.equal(JSON.stringify(tag.techs), JSON.stringify(['android.nfc.tech.NfcA']));
+    assert.equal(tag.classicUnsupported, true);
+    assert.equal(JSON.stringify(tag.memory), JSON.stringify(CLASSIC_MEMORY));
+});
+
+test('consumeTag accepts type2 and nfcv memory without keyFormat or unreadable', async () => {
+    for (const kind of ['type2', 'nfcv']) {
+        const tag = await consume({ uid: '04A23F11', tech: 'nfca', memory: { kind, data: 'AAAA' } });
+        assert.equal(JSON.stringify(tag.memory), JSON.stringify({ kind, data: 'AAAA' }));
+    }
+});
+
+test('consumeTag drops an invalid memory but still delivers the UID and tech', async () => {
+    const bad = [
+        { kind: 'mifare', data: 'AAAA' },
+        { kind: 'classic' },
+        { kind: 'classic', data: 'AA<A' },
+        { kind: 'classic', data: '' },
+        { kind: 'classic', data: 'A'.repeat(3000) },
+        { kind: 'classic', data: 'AAAA===' },
+        { kind: 'classic', data: 'AAAA', keyFormat: 'Bad Id' },
+        { kind: 'classic', data: 'AAAA', keyFormat: 'a'.repeat(51) },
+        { kind: 'classic', data: 'AAAA', keyFormat: 7 },
+        { kind: 'classic', data: 'AAAA', unreadable: [16] },
+        { kind: 'classic', data: 'AAAA', unreadable: [-1] },
+        { kind: 'classic', data: 'AAAA', unreadable: [1.5] },
+        { kind: 'classic', data: 'AAAA', unreadable: ['1'] },
+        { kind: 'classic', data: 'AAAA', unreadable: new Array(17).fill(1) },
+        { kind: 'classic', data: 'AAAA', unreadable: 3 },
+        'classic',
+        [],
+        42
+    ];
+    for (const memory of bad) {
+        const tag = await consume({ uid: '04A23F11', tech: 'nfca', memory });
+        assert.ok(tag, `lost the tag for ${JSON.stringify(memory)}`);
+        assert.equal(tag.uid, '04A23F11');
+        assert.equal(tag.tech, 'nfca');
+        assert.ok(!('memory' in tag), `kept ${JSON.stringify(memory)}`);
+    }
+});
+
+test('consumeTag keeps memory at the size and list caps', async () => {
+    const tag = await consume({
+        uid: '04A23F11', tech: 'nfca',
+        memory: {
+            kind: 'classic', data: 'A'.repeat(2798) + '==', keyFormat: 'a'.repeat(50),
+            unreadable: new Array(16).fill(0).map((_, i) => i)
+        }
+    });
+    assert.ok(tag.memory);
+    assert.equal(tag.memory.unreadable.length, 16);
+});
+
+test('consumeTag drops invalid techs and classicUnsupported but keeps the rest', async () => {
+    const bad = [
+        { techs: 'x' },
+        { techs: new Array(11).fill('a') },
+        { techs: ['a'.repeat(65)] },
+        { techs: [1] },
+        { classicUnsupported: 'yes' },
+        { classicUnsupported: 1 }
+    ];
+    for (const extra of bad) {
+        const tag = await consume({ uid: '04A23F11', tech: 'nfca', memory: CLASSIC_MEMORY, ...extra });
+        assert.equal(tag.uid, '04A23F11');
+        const key = Object.keys(extra)[0];
+        assert.ok(!(key in tag), `kept ${JSON.stringify(extra)}`);
+        assert.ok(tag.memory, 'memory should survive');
+    }
+});
+
+test('consumeTag without the new fields returns just uid and tech', async () => {
+    const tag = await consume({ uid: '04A23F11', tech: 'nfca' });
+    assert.equal(JSON.stringify(tag), JSON.stringify({ uid: '04A23F11', tech: 'nfca' }));
+});
+
+test('a request whose message cannot be serialized rejects and leaves nothing pending', async () => {
+    const { bridge, posted, reply } = installShim();
+    const hostile = {
+        toJSON() {
+            throw new Error('boom');
+        }
+    };
+    await assert.rejects(bridge.registerForPush(hostile), /boom/);
+    assert.equal(posted.length, 0, 'nothing was posted');
+
+    // The bridge still works, and ids stay correlated.
+    const next = bridge.registerForPush('bearer-ok');
+    assert.equal(posted.length, 1);
+    reply(0, { ok: true });
+    assert.equal((await next).ok, true);
+});

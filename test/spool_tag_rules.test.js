@@ -1,51 +1,26 @@
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { findJavac, compile, runJava } = require('./helpers/javac');
 
 const pluginDir = path.join(__dirname, '..', 'plugins-local', 'cordova-plugin-printlog-native');
 const javaDir = path.join(pluginDir, 'src', 'android');
 
-/** javac from JAVA_HOME, else from PATH; null when neither has one. */
-function findJavac() {
-    const candidates = [];
-    if (process.env.JAVA_HOME) {
-        candidates.push(path.join(process.env.JAVA_HOME, 'bin', 'javac'));
-    }
-    candidates.push('javac');
-    for (const javac of candidates) {
-        const probe = spawnSync(javac, ['-version'], { encoding: 'utf8' });
-        if (probe.status === 0) {
-            return javac;
-        }
-    }
-    return null;
-}
-
 const javac = findJavac();
 let classesDir;
 
+/** Compiles once, on first use. */
+function ensureCompiled() {
+    if (!classesDir) {
+        classesDir = compile(['SpoolTagRules.java']);
+    }
+    return classesDir;
+}
+
 /** Runs SpoolTagRules.main: "<tech> <uid>" or "drop <reason>". */
 function classify(hexId, ...techs) {
-    if (!classesDir) {
-        classesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'spool-tag-rules-'));
-        const compiled = spawnSync(
-            javac,
-            ['-d', classesDir, path.join(javaDir, 'SpoolTagRules.java')],
-            { encoding: 'utf8' }
-        );
-        assert.equal(compiled.status, 0, compiled.stderr);
-    }
-    const java = path.join(path.dirname(javac), process.platform === 'win32' ? 'java.exe' : 'java');
-    const run = spawnSync(
-        fs.existsSync(java) ? java : 'java',
-        ['-cp', classesDir, 'com.hoffmanengineering.printlog.SpoolTagRules', hexId, ...techs],
-        { encoding: 'utf8' }
-    );
-    assert.equal(run.status, 0, run.stderr);
-    return run.stdout.trim();
+    return runJava(ensureCompiled(), 'SpoolTagRules', [hexId, ...techs]);
 }
 
 const NFCA = 'android.nfc.tech.NfcA';
@@ -81,6 +56,31 @@ test('a 4-byte NFC-A UID starting 08 is a random ID and is dropped', { skip }, (
 test('a tag with no ID or no spool tech is dropped', { skip }, () => {
     assert.equal(classify('', NFCA), 'drop no id');
     assert.equal(classify('04A23F11', 'android.nfc.tech.Ndef'), 'drop no spool tech');
+});
+
+/** Runs SpoolTagRules.main in its classic-unsupported mode: "<sak hex> <techs...>" gives true or false. */
+function classicUnsupported(sakHex, ...techs) {
+    return runJava(ensureCompiled(), 'SpoolTagRules', ['classic-unsupported', sakHex, ...techs]);
+}
+
+test('a Classic-looking chip without MifareClassic support is flagged', { skip }, () => {
+    assert.equal(classicUnsupported('08', NFCA), 'true');
+    assert.equal(classicUnsupported('18', NFCA), 'true');
+    assert.equal(classicUnsupported('09', NFCA), 'true');
+    assert.equal(classicUnsupported('88', NFCA), 'true');
+    assert.equal(classicUnsupported('28', NFCA), 'true');
+});
+
+test('a Classic-looking chip with an empty tech list is flagged', { skip }, () => {
+    assert.equal(classicUnsupported('08'), 'true');
+});
+
+test('a Classic chip the phone can read, or any other chip, is not flagged', { skip }, () => {
+    assert.equal(classicUnsupported('08', NFCA, CLASSIC), 'false');
+    assert.equal(classicUnsupported('09', NFCA, CLASSIC), 'false');
+    assert.equal(classicUnsupported('88', NFCA, CLASSIC), 'false');
+    assert.equal(classicUnsupported('00', NFCA), 'false');
+    assert.equal(classicUnsupported('20', NFCA), 'false');
 });
 
 test('every NFC action the shim sends runs on the UI thread', () => {
