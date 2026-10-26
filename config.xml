@@ -33,7 +33,10 @@
         <allow-intent href="itms:*" />
         <allow-intent href="itms-apps:*" />
         <icon src="www/img/logo.png" width="1024" height="1024" />
-        <preference name="deployment-target" value="13.0" />
+        <!-- 15.0 because the Firebase iOS SDK that cordova-plugin-firebasex-messaging pins
+             (12.x) declares .iOS(.v15) in its Swift package. Anything lower and Xcode refuses
+             to resolve the package graph. -->
+        <preference name="deployment-target" value="15.0" />
         <preference name="WKWebViewOnly" value="true" />
         <preference name="AllowInlineMediaPlayback" value="true" />
         <edit-config target="NSCameraUsageDescription" file="*-Info.plist" mode="merge">
@@ -44,6 +47,11 @@
         </edit-config>
         <edit-config target="NSPhotoLibraryAddUsageDescription" file="*-Info.plist" mode="merge">
             <string>3D Print Log needs photo library access to save photos of your 3D prints</string>
+        </edit-config>
+        <!-- The app's only encryption is HTTPS through the OS, which is exempt from export
+             reporting. Declaring it here stops App Store Connect asking on every build. -->
+        <edit-config target="ITSAppUsesNonExemptEncryption" file="*-Info.plist" mode="merge">
+            <false/>
         </edit-config>
     </platform>
     <preference name="OverrideUserAgent" value="Mozilla/5.0 Google PrintLog/1.2" />

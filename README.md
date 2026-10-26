@@ -11,7 +11,7 @@ This is an [Apache Cordova](https://cordova.apache.org/) hybrid app: a native sh
 
 **Android** is shipping — see the app on Google Play.
 
-**iOS** is designed but **not implemented**. `azure-pipelines-ios.yml` and `ios-build-guide.md` describe an intended iOS build; neither has ever run. Treat them as design notes, not working configuration.
+**iOS** is in progress ([3d-print-log-ui#19](https://github.com/HoffmanEngineering/3d-print-log-ui/issues/19)). CI builds it for the simulator; it is not on the App Store yet.
 
 ## Prerequisites
 
