@@ -43,8 +43,14 @@
              (12.x) declares .iOS(.v15) in its Swift package. Anything lower and Xcode refuses
              to resolve the package graph. -->
         <preference name="deployment-target" value="15.0" />
-        <preference name="WKWebViewOnly" value="true" />
         <preference name="AllowInlineMediaPlayback" value="true" />
+        <!-- Edge swipe goes back through WebView history, the iOS counterpart of
+             patch_back_navigation.js. index.js uses location.replace(), so swiping back from
+             the site's first page cannot land on the bootstrap page. -->
+        <preference name="AllowBackForwardNavigationGestures" value="true" />
+        <!-- The launch storyboard has no image, so without this it is a white (or black)
+             screen that then jumps to the blue bootstrap page. -->
+        <preference name="SplashScreenBackgroundColor" value="#3F50B5" />
         <edit-config target="NSCameraUsageDescription" file="*-Info.plist" mode="merge">
             <string>3D Print Log needs camera access to scan QR codes and capture photos of your prints</string>
         </edit-config>
