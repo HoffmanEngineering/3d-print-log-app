@@ -116,8 +116,16 @@ tag be pushed.
   it. Changing the version in that string without the matching UI change silently disables
   every Cordova-specific behavior in the shipped app, including push registration.
   `scripts/check-user-agent-contract.mjs` checks both repos in CI, and reads the UI's actual
-  `CORDOVA_USER_AGENT` constant rather than a hardcoded copy. Run it locally with
+  constants rather than a hardcoded copy. Run it locally with
   `PRINT_LOG_UI_PATH=../3d-print-log-ui npm run check:user-agent`.
+- **There are two user agents.** The global preference is Android's (`CORDOVA_USER_AGENT`
+  in the UI); `<platform name="ios">` overrides it with `PrintLog-iOS/x.y`
+  (`CORDOVA_IOS_USER_AGENT`), because App Store rules force iOS-only behavior in the UI
+  (no Stripe checkout, a different NFC flow, no `capture` file input). The UI's
+  `isCordova` is true for both; `isCordovaAndroid` / `isCordovaIos` tell them apart. The
+  contract script reads each value from its own scope (the iOS block comes first in the
+  file) and fails if iOS loses its override. **A UA change merges in the UI first**: CI
+  checks against the UI's `main`.
 - **CI checks the UI repo out as a SIBLING of this one, never inside it.** `ci.yml` needs
   `print-log-ui` so `check:user-agent` can read the UI's real `CORDOVA_USER_AGENT`. This
   repo is therefore checked out into `app/`, the job sets

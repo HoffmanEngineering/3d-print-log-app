@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 /**
- * Verifies that the user agent this app pins and the one the UI recognizes still match.
+ * Verifies that the user agents this app pins and the ones the UI recognizes still match.
  *
  * config.xml's OverrideUserAgent is load-bearing: the UI's isCordova compares
  * navigator.userAgent for EXACT equality with it. Bump the version in one repo and not the
  * other and every Cordova-specific behavior in the shipped app silently switches off —
  * push registration, the native file chooser, the Auth0 redirect URI. Nothing errors. The
  * app just quietly becomes a plain browser.
+ *
+ * There are two pairs. Android uses the global preference; iOS overrides it inside
+ * <platform name="ios">, because the UI must tell the shells apart (App Store rules force
+ * iOS-only behavior). The iOS block comes first in the file, so "the first
+ * OverrideUserAgent" would be the iOS one: each value is read from its own scope.
  *
  * Reads the UI's actual file rather than a hardcoded copy, so a change on either side is
  * caught. A hardcoded expectation here would stay green while the UI drifted.
@@ -21,33 +26,52 @@ const UI_PATH = process.env.PRINT_LOG_UI_PATH
   ? resolve(process.env.PRINT_LOG_UI_PATH)
   : resolve(repoRoot, '..', '3d-print-log-ui');
 
-const CONFIG_XML = join(repoRoot, 'config.xml');
+const CONFIG_XML = process.env.PRINT_LOG_CONFIG_XML
+  ? resolve(process.env.PRINT_LOG_CONFIG_XML)
+  : join(repoRoot, 'config.xml');
 const PLATFORM_TS = join(UI_PATH, 'src', 'app', 'core', 'utils', 'platform.ts');
+
+const PLATFORM_BLOCK = /<platform\s+name=["']([^"']+)["']\s*>([\s\S]*?)<\/platform>/g;
 
 function fail(message) {
   console.error(`✖ user agent contract: ${message}`);
   process.exit(1);
 }
 
-function appUserAgent() {
-  const xml = readFileSync(CONFIG_XML, 'utf8');
-  const match = xml.match(
-    /<preference\s+name=["']OverrideUserAgent["']\s+value=["']([^"']+)["']/
-  );
-  if (!match) {
-    fail(`no OverrideUserAgent preference found in ${CONFIG_XML}`);
+function overrideUserAgentIn(xml) {
+  const matches = [
+    ...xml.matchAll(
+      /<preference\s+name=["']OverrideUserAgent["']\s+value=["']([^"']+)["']/g
+    ),
+  ];
+  if (matches.length > 1) {
+    fail(`more than one OverrideUserAgent in the same scope of ${CONFIG_XML}`);
   }
-  return match[1];
+  return matches[0]?.[1];
 }
 
-function uiUserAgent() {
-  const source = readFileSync(PLATFORM_TS, 'utf8');
+function appUserAgents() {
+  // XML comments can quote a preference; drop them before matching.
+  const xml = readFileSync(CONFIG_XML, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+  const global = overrideUserAgentIn(xml.replace(PLATFORM_BLOCK, ''));
+  const blocks = Object.fromEntries(
+    [...xml.matchAll(PLATFORM_BLOCK)].map(([, name, body]) => [name, body])
+  );
+  const android = overrideUserAgentIn(blocks.android ?? '') ?? global;
+  const ios = overrideUserAgentIn(blocks.ios ?? '') ?? global;
+  if (!android || !ios) {
+    fail(`no OverrideUserAgent for ${android ? 'iOS' : 'Android'} in ${CONFIG_XML}`);
+  }
+  return { android, ios };
+}
+
+function uiConstant(source, name) {
   const match = source.match(
-    /CORDOVA_USER_AGENT\s*=\s*["'`]([^"'`]+)["'`]/
+    new RegExp(`\\b${name}\\s*=\\s*["'\`]([^"'\`]+)["'\`]`)
   );
   if (!match) {
     fail(
-      `no CORDOVA_USER_AGENT constant found in ${PLATFORM_TS}. ` +
+      `no ${name} constant found in ${PLATFORM_TS}. ` +
         'The UI must export it for this check to have anything to compare against.'
     );
   }
@@ -64,16 +88,47 @@ if (!existsSync(PLATFORM_TS)) {
   process.exit(0);
 }
 
-const app = appUserAgent();
-const ui = uiUserAgent();
+const app = appUserAgents();
+const source = readFileSync(PLATFORM_TS, 'utf8');
+const ui = {
+  android: uiConstant(source, 'CORDOVA_USER_AGENT'),
+  ios: uiConstant(source, 'CORDOVA_IOS_USER_AGENT'),
+};
 
-if (app !== ui) {
+if (app.android === app.ios) {
   fail(
-    'the two repos disagree, so every Cordova-only behavior would be off in the ' +
-      'shipped app.\n' +
-      `  ${CONFIG_XML}\n    OverrideUserAgent   = ${JSON.stringify(app)}\n` +
-      `  ${PLATFORM_TS}\n    CORDOVA_USER_AGENT  = ${JSON.stringify(ui)}`
+    `Android and iOS both pin ${JSON.stringify(app.android)}, so the UI cannot tell ` +
+      'the shells apart. iOS needs its own OverrideUserAgent in <platform name="ios">.'
   );
 }
 
-console.log(`✔ user agent contract: both repos pin ${JSON.stringify(app)}`);
+const mismatches = [
+  ['Android', 'OverrideUserAgent', 'CORDOVA_USER_AGENT', app.android, ui.android],
+  [
+    'iOS',
+    'OverrideUserAgent (ios)',
+    'CORDOVA_IOS_USER_AGENT',
+    app.ios,
+    ui.ios,
+  ],
+].filter(([, , , pinned, recognized]) => pinned !== recognized);
+
+if (mismatches.length > 0) {
+  fail(
+    'the two repos disagree, so every Cordova-only behavior would be off in the ' +
+      'shipped app.\n' +
+      mismatches
+        .map(
+          ([platform, appName, uiName, pinned, recognized]) =>
+            `  ${platform}:\n` +
+            `    ${CONFIG_XML}\n      ${appName} = ${JSON.stringify(pinned)}\n` +
+            `    ${PLATFORM_TS}\n      ${uiName} = ${JSON.stringify(recognized)}`
+        )
+        .join('\n')
+  );
+}
+
+console.log(
+  `✔ user agent contract: Android pins ${JSON.stringify(app.android)}, ` +
+    `iOS pins ${JSON.stringify(app.ios)}, and the UI recognizes both`
+);
