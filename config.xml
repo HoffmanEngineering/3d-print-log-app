@@ -32,7 +32,13 @@
     <platform name="ios">
         <allow-intent href="itms:*" />
         <allow-intent href="itms-apps:*" />
-        <icon src="www/img/logo.png" width="1024" height="1024" />
+        <!-- App Store Connect rejects a marketing icon that is not 1024x1024 or has an alpha
+             channel, and Xcode 26's actool fails the build outright ("AppIcon did not have
+             any applicable content") on a smaller one. www/img/logo.png is 180x180 RGBA, so
+             iOS gets its own: the same square crop of the brand mark (the UI's 3d_brand_logo
+             SVG), rendered at 1024 and flattened. Outside www/ so it is not shipped as web
+             content. -->
+        <icon src="res/ios/icon-1024.png" width="1024" height="1024" />
         <!-- 15.0 because the Firebase iOS SDK that cordova-plugin-firebasex-messaging pins
              (12.x) declares .iOS(.v15) in its Swift package. Anything lower and Xcode refuses
              to resolve the package graph. -->

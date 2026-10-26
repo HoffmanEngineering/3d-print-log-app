@@ -315,6 +315,11 @@ NFC.
   the generated Xcode project and `App-Info.plist`. Only the build needs macOS.
 - Permission descriptions and `ITSAppUsesNonExemptEncryption` live in `config.xml`'s
   `<platform name="ios">`. App Store Connect rejects a build missing a usage string.
+- **The iOS icon is `res/ios/icon-1024.png`, not `www/img/logo.png`.** Xcode 26 fails the
+  asset catalog on anything smaller than 1024x1024 ("AppIcon did not have any applicable
+  content"), and App Store Connect also rejects an alpha channel; `logo.png` is 180x180
+  RGBA. It is the same square crop of the brand mark, rendered from the UI's
+  `3d_brand_logo` SVG.
 
 ## Companion UI Repository
 
