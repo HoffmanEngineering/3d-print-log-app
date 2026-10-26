@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **App ID:** com.hoffmanengineering.printlog
 **Version:** 1.3.0
 **Repository:** https://github.com/HoffmanEngineering/3d-print-log-app (public, AGPL-3.0-only)
-**Platforms:** Android (shipping). iOS is **designed but never implemented** — see iOS Build Notes.
+**Platforms:** Android (shipping). iOS is **in progress** (HoffmanEngineering/3d-print-log-ui#19): CI builds it for the simulator, nothing ships yet — see iOS Build Notes.
 
 ## Build Commands
 
@@ -23,9 +23,8 @@ npm run release:android
 # Run on connected device/emulator
 npx cordova run android
 
-# iOS scripts exist but have never been run - see iOS Build Notes
-npm run build:ios
-npm run release:ios
+# iOS needs macOS with Xcode; CI's ios job runs this - see iOS Build Notes
+npx cordova build ios --emulator
 ```
 
 The Cordova CLI is pinned at 13.0.0 in `devDependencies`; `npm install` puts it in
@@ -37,7 +36,7 @@ GitHub Actions. There is no Azure DevOps remote.
 
 | Workflow                        | Trigger             | Produces                                                       |
 | ------------------------------- | ------------------- | -------------------------------------------------------------- |
-| `.github/workflows/ci.yml`      | push / PR to `main` | Unsigned debug APK, uploaded as an artifact (14-day retention) |
+| `.github/workflows/ci.yml`      | push / PR to `main` | Unsigned debug APK, uploaded as an artifact (14-day retention); an unsigned iOS simulator build (`ios` job, not uploaded) |
 | `.github/workflows/release.yml` | push of a `v*` tag  | Signed AAB attached to a GitHub Release                        |
 
 **Cutting a release:** push a `v*` tag, then approve the pending deployment. The
@@ -64,7 +63,7 @@ tag be pushed.
 
 ## Architecture
 
-**Framework:** Apache Cordova 13.0.0 with cordova-android 15.1.0 and cordova-ios 7.1.1
+**Framework:** Apache Cordova 13.0.0 with cordova-android 15.1.0 and cordova-ios 8.1.1
 
 **Entry Flow:**
 
@@ -96,7 +95,6 @@ tag be pushed.
 - `platforms/android/` - Android platform build files (generated — do not edit directly)
 - `platforms/ios/` - iOS platform build files (generated — do not edit directly)
 - `build.json` - Code signing config for Android (keystore) and iOS (Team ID, provisioning)
-- `azure-pipelines-ios.yml` - Unimplemented iOS pipeline design; never ran (see iOS Build Notes)
 - `hooks/before_compile/patch_camera_permission.js` - Build hook that patches WebView camera permission handling (see Build Notes)
 
 ## Build Notes
@@ -291,22 +289,37 @@ material page's tag field and the Materials list's Scan spool sheet. Design:
 
 ## iOS Build Notes
 
-**iOS has never been built or shipped.** `azure-pipelines-ios.yml` and
-`ios-build-guide.md` are _design artifacts_ describing an intended build that was
-never implemented, and the Azure pipeline they reference no longer has a remote to
-run on. Do not treat either file as working configuration or as a source of truth —
-notably not for the Node version, which is **20** everywhere that matters
-(`ios-build-guide.md` and the Azure pipeline say 18).
+**iOS has not shipped.** The plan and its issues are tracked in
+HoffmanEngineering/3d-print-log-ui#19. There is no Mac in the workflow: everything
+builds on GitHub's macOS runners, which are free only because this repo is public.
 
-Implementing iOS means porting to a GitHub Actions macOS runner, not reviving the
-Azure pipeline. The design notes below are what was intended:
+What exists today is CI's `ios` job: a fresh `cordova platform add ios@8.1.1` and an
+unsigned `cordova build ios --emulator`. Signing and TestFlight upload (#28) are not
+built yet, and the native plugin has no iOS side (#31), so an iOS build has no push or
+NFC.
 
-- iOS builds require macOS with Xcode
-- `build.json` would carry iOS signing config with `TEAM_ID_PLACEHOLDER`, substituted at build time
-- Minimum deployment target: iOS 13.0
-- WKWebView only (UIWebView removed)
-- Permission descriptions live in config.xml `<platform name="ios">` (required for App Store)
-- Four signing secrets were envisaged: `APPLE_TEAM_ID`, `IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`
+- **Plugins come in through Swift Package Manager, not CocoaPods.** cordova-ios 8 links
+  any plugin that ships a `Package.swift` (firebasex does) into
+  `platforms/ios/packages/cordova-ios-plugins`, so an empty Podfile is normal.
+- **`deployment-target` is 15.0 because Firebase requires it.** The firebasex 12.x Swift
+  packages declare `.iOS(.v15)`, and SwiftPM refuses a dependent package with a lower
+  minimum.
+- **Change `deployment-target` on a fresh platform only.** cordova-ios 8.1.1's prepare
+  rewrites the plugins package's platform only in its `.iOS(.vNN)` form, but create writes
+  `.iOS("NN.0")`, so a later prepare never updates it. Locally, after changing it,
+  `cordova platform rm ios` and add it again. CI always adds fresh.
+- **No `GoogleService-Info.plist` is needed to compile.** firebasex-core ships a
+  placeholder and only warns. A build that should receive push needs the real one,
+  injected from a secret the way `google-services.json` is.
+- `cordova platform add ios` runs on Linux and Windows too, which is enough to inspect
+  the generated Xcode project and `App-Info.plist`. Only the build needs macOS.
+- Permission descriptions and `ITSAppUsesNonExemptEncryption` live in `config.xml`'s
+  `<platform name="ios">`. App Store Connect rejects a build missing a usage string.
+- **The iOS icon is `res/ios/icon-1024.png`, not `www/img/logo.png`.** Xcode 26 fails the
+  asset catalog on anything smaller than 1024x1024 ("AppIcon did not have any applicable
+  content"), and App Store Connect also rejects an alpha channel; `logo.png` is 180x180
+  RGBA. It is the same square crop of the brand mark, rendered from the UI's
+  `3d_brand_logo` SVG.
 
 ## Companion UI Repository
 
