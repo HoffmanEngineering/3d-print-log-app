@@ -512,3 +512,7 @@ test('a request whose message cannot be serialized rejects and leaves nothing pe
     reply(0, { ok: true });
     assert.equal((await next).ok, true);
 });
+
+test('reports android unless the host says ios', () => {
+    assert.equal(installShim().bridge.platform, 'android');
+});

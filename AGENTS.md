@@ -232,6 +232,38 @@ Firebase credentials — the client `google-services.json` and the API's service
 which are different credentials with different handling — are covered in
 `docs/firebase-setup.md`.
 
+### On iOS (#31)
+
+The same page contract, `window.PrintLogNative`, from `src/ios/PrintLogNativePlugin.swift`.
+Not yet run on a device; CI compiles it.
+
+- **The plugin is a Swift package** (`Package.swift`, `package="swift"` in plugin.xml), not
+  loose source files: it imports `FirebaseMessaging` and firebasex's message receiver, and
+  cordova-ios 8 only links modules a package declares. Its target path is the plugin root so
+  both `www/` scripts are package resources (`Bundle.module`), and the shim stays one file for
+  both platforms. `exclude` keeps `src/android` out of it.
+- **The host object is `www/printlog-native-ios-host.js`.** WKWebView has nothing like
+  `addWebMessageListener`, so that script builds `PrintLogNativeHost` over a
+  `WKScriptMessageHandler`, and native answers with `__deliver(reply)` through
+  `callAsyncJavaScript` arguments, never by building script from reply text. It is injected
+  with the shim as a main-frame `WKUserScript` at document start and refuses any origin but
+  `https://www.3dprintlog.com`; native checks the sending frame's origin on every message
+  again. `test/ios_host.test.js` runs the two scripts together.
+- **`PrintLogBridgeRouter.swift` speaks the Java router's protocol** with completions for the
+  async actions, and has no UIKit, WebKit or Cordova in it, so CI's `ios` job compiles it
+  with `test/ios/main.swift` and runs that with plain `swiftc`.
+- **Taps come from firebasex's receiver hook**, `FirebasePluginMessageReceiverManager`. On
+  iOS every tap, cold or warm, goes through `userNotificationCenter(_:didReceive:)`, which
+  firebasex marks with `tap`, so unlike Android keying off `tap` (plus `notificationId`) is
+  right here. Registering any receiver makes firebasex skip its own JS delivery, which this
+  app never uses.
+- **A foreground notification shows only if its payload carries `notification_foreground`**:
+  firebasex's `willPresentNotification` never calls the completion handler without it. That
+  key comes from the API, in the APNs payload.
+- **The FCM token needs the APNs token first**, so `registerForPush` calls
+  `registerForRemoteNotifications` and retries `Messaging.token` for up to 10 s.
+- **NFC answers `unsupported`** until Core NFC reading lands (#32).
+
 ## NFC Spool Tags
 
 The same plugin reads the UID of a spool's RFID/NFC tag for the UI's filament picker, the
@@ -305,9 +337,10 @@ HoffmanEngineering/3d-print-log-ui#19. There is no Mac in the workflow: everythi
 builds on GitHub's macOS runners, which are free only because this repo is public.
 
 What exists today is CI's `ios` job: a fresh `cordova platform add ios@8.1.1` and an
-unsigned `cordova build ios --emulator`. Signing and TestFlight upload (#28) are not
-built yet, and the native plugin has no iOS side (#31), so an iOS build has no push or
-NFC.
+unsigned `cordova build ios --emulator`, after compiling and running the Swift bridge
+router's tests. Signing and TestFlight upload (#28) are not built yet. The native plugin
+has an iOS side for push and taps ("On iOS" under Push Notifications), untested on a
+device; NFC is not built (#32).
 
 - **Plugins come in through Swift Package Manager, not CocoaPods.** cordova-ios 8 links
   any plugin that ships a `Package.swift` (firebasex does) into

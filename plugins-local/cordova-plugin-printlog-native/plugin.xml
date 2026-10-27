@@ -50,4 +50,19 @@
 
         <framework src="androidx.webkit:webkit:1.12.1" />
     </platform>
+
+    <!--
+        iOS is a Swift package (Package.swift) rather than loose source files: it needs
+        FirebaseMessaging and firebasex's message receiver as module imports, and cordova-ios 8
+        links only packages that declare them. Package.swift also carries www/printlog-native.js
+        as a resource, so the shim stays one file for both platforms.
+    -->
+    <platform name="ios" package="swift">
+        <config-file target="config.xml" parent="/*">
+            <feature name="PrintLogNative">
+                <param name="ios-package" value="PrintLogNativePlugin" />
+                <param name="onload" value="true" />
+            </feature>
+        </config-file>
+    </platform>
 </plugin>

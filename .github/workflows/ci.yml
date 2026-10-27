@@ -115,6 +115,14 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      # The bridge router has no UIKit, WebKit or Cordova in it, so it compiles and runs on
+      # its own with plain swiftc, the way the Java helpers are tested with javac.
+      - name: Test the Swift bridge router
+        run: |
+          SRC=plugins-local/cordova-plugin-printlog-native/src/ios
+          swiftc -o "$RUNNER_TEMP/router-tests" "$SRC/PrintLogBridgeRouter.swift" test/ios/main.swift
+          "$RUNNER_TEMP/router-tests"
+
       - name: Install dependencies
         run: npm ci
 

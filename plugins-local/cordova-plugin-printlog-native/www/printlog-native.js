@@ -232,7 +232,8 @@
   }
 
   var bridge = {
-    platform: 'android',
+    // The iOS host names itself; Android's WebMessageListener host carries no properties.
+    platform: host.platform === 'ios' ? 'ios' : 'android',
     appVersion: host.appVersion || '',
     pushPermission: host.pushPermission || 'default',
 
