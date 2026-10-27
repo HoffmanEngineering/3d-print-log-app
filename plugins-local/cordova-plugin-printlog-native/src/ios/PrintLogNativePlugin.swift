@@ -1,3 +1,4 @@
+import AuthenticationServices
 import Cordova
 import FirebaseMessaging
 import UIKit
@@ -5,8 +6,8 @@ import UserNotifications
 import WebKit
 import cordova_plugin_firebasex_messaging
 
-/// The iOS side of the native bridge: push registration, notification taps and spool tag
-/// reading for the remotely loaded app. The page-facing half is `www/printlog-native.js`, shared unchanged
+/// The iOS side of the native bridge: push registration, notification taps, spool tag reading
+/// and the Auth0 login sheet for the remotely loaded app. The page-facing half is `www/printlog-native.js`, shared unchanged
 /// with Android; this file supplies the `PrintLogNativeHost` object that the shim talks to.
 ///
 /// Why it exists is the same as on Android: once the WebView navigates to
@@ -81,6 +82,64 @@ final class PrintLogNativePlugin: CDVPlugin, PrintLogBridgeActions {
             name: UIApplication.didBecomeActiveNotification, object: nil)
 
         refreshPermission { _ in }
+    }
+
+    // MARK: - Login (#30)
+    //
+    // Google refuses OAuth inside an embedded WebView, and App Review expects third-party login
+    // in the system sheet. So the Auth0 /authorize navigation is cancelled here and opened in
+    // ASWebAuthenticationSession instead, the iOS counterpart of Android's Custom Tab
+    // (patch_auth_custom_tab.js). Auth0 redirects to the app's custom scheme, the session
+    // returns that URL, and the page gets it through window.handleOpenURL, exactly as the
+    // Android customurlscheme plugin delivers it.
+
+    private var authSession: ASWebAuthenticationSession?
+
+    /// Asked by CDVWebViewEngine for every navigation. Every plugin that answers must allow a
+    /// navigation for it to happen, and IntentAndNavigationFilter (onload) always answers, so
+    /// allowing here never widens config.xml's allow-navigation list.
+    @objc(shouldOverrideLoadWithRequest:navigationType:info:)
+    func shouldOverrideLoad(
+        _ request: URLRequest, navigationType: Int32, info: [AnyHashable: Any]
+    ) -> Bool {
+        guard let url = request.url, PrintLogAuthRules.isAuthorize(url) else {
+            return true
+        }
+        // Only a top-level navigation is the login page. A silent-auth iframe stays as it was.
+        if let target = info["targetFrame"] as? WKFrameInfo, !target.isMainFrame {
+            return true
+        }
+        DispatchQueue.main.async { self.startLogin(url) }
+        return false
+    }
+
+    private func startLogin(_ url: URL) {
+        guard authSession == nil else { return }
+
+        let session = ASWebAuthenticationSession(
+            url: url, callbackURLScheme: PrintLogAuthRules.callbackScheme
+        ) { [weak self] callback, _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.authSession = nil
+                // Cancelled or failed: the page stays where it was, as when a Custom Tab is
+                // closed on Android.
+                guard let callback = callback, PrintLogAuthRules.isCallback(callback) else {
+                    return
+                }
+                self.evaluateInPage(
+                    "window.handleOpenURL && window.handleOpenURL("
+                        + Self.jsonString(callback.absoluteString) + ");")
+            }
+        }
+        session.presentationContextProvider = self
+        // Shares Safari's cookies, so a user already signed in to Google there gets one tap.
+        // The cost is iOS's "wants to use auth0.com to sign in" prompt before the sheet.
+        session.prefersEphemeralWebBrowserSession = false
+        authSession = session
+        if !session.start() {
+            authSession = nil
+        }
     }
 
     // MARK: - The channel
@@ -447,5 +506,11 @@ private final class PrintLogTapReceiver: FirebasePluginMessageReceiver {
 
     override func sendNotification(_ notification: [AnyHashable: Any]) {
         onNotification(notification)
+    }
+}
+
+extension PrintLogNativePlugin: ASWebAuthenticationPresentationContextProviding {
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        viewController?.view.window ?? ASPresentationAnchor()
     }
 }

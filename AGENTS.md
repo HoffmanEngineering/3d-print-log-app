@@ -263,6 +263,16 @@ Not yet run on a device; CI compiles it.
 - **The FCM token needs the APNs token first**, so `registerForPush` calls
   `registerForRemoteNotifications` and retries `Messaging.token` for up to 10 s.
 - **NFC is session mode** (#32); see "On iOS" under NFC Spool Tags.
+- **Login runs in `ASWebAuthenticationSession`** (#30), the counterpart of
+  `patch_auth_custom_tab.js`. The plugin answers CDVWebViewEngine's
+  `shouldOverrideLoadWithRequest:navigationType:info:` and cancels only a main-frame
+  navigation to `https://*.auth0.com/authorize` (`PrintLogAuthRules`); the callback URL
+  (scheme `com.hoffmanengineering.printlog`, the UI's `cordovaCallbackUri`) reaches the page
+  through `window.handleOpenURL`, as the customurlscheme plugin delivers it on Android.
+  **Returning YES from that hook is safe only because every answering plugin must allow a
+  navigation and `IntentAndNavigationFilter` is `onload`**, so `allow-navigation` still
+  applies. Not ephemeral: Safari's Google session is shared, at the cost of iOS's
+  "wants to use auth0.com" prompt.
 
 ## NFC Spool Tags
 
