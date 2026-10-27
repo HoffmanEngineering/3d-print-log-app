@@ -5,12 +5,14 @@
   "cordova": {
     "id": "cordova-plugin-printlog-native",
     "platforms": [
-      "android"
+      "android",
+      "ios"
     ]
   },
   "keywords": [
     "ecosystem:cordova",
-    "cordova-android"
+    "cordova-android",
+    "cordova-ios"
   ],
   "author": "Hoffman Engineering",
   "license": "AGPL-3.0-only"
