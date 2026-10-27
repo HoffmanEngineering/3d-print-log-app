@@ -21,14 +21,48 @@
 // See https://cordova.apache.org/docs/en/latest/cordova/events/events.html#deviceready
 document.addEventListener("deviceready", onDeviceReady, false);
 
+var started = false;
+
+// Offline at launch used to be an alert and then nothing: the app sat on the splash until
+// it was killed and reopened. App Review launches in airplane mode, so it now waits on a
+// visible screen and carries on by itself when the network plugin reports "online", or when
+// the user taps Try again.
 function onDeviceReady() {
-  if (navigator.connection.type == Connection.NONE) {
-    navigator.notification.alert("An internet connection is required to continue");
+  document.addEventListener("online", start, false);
+
+  var retry = byId("retry");
+  if (retry) {
+    retry.addEventListener("click", start, false);
+  }
+
+  start();
+}
+
+function start() {
+  if (started) {
     return;
   }
 
+  if (navigator.connection.type == Connection.NONE) {
+    showOffline();
+    return;
+  }
+
+  // Guards against "online" and a tap both arriving before the navigation takes over.
+  started = true;
   setupPushChannel();
   window.location.replace("https://www.3dprintlog.com");
+}
+
+function showOffline() {
+  var offline = byId("offline");
+  if (offline) {
+    offline.hidden = false;
+  }
+}
+
+function byId(id) {
+  return document.getElementById ? document.getElementById(id) : null;
 }
 
 // Android groups notifications by channel, and the channel is what a user mutes in system

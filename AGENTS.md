@@ -70,7 +70,10 @@ tag be pushed.
 1. `www/index.html` loads as entry point with splash screen
 2. `www/js/index.js` handles Cordova `deviceready` event
 3. Network connectivity check via cordova-plugin-network-information
-4. On success, navigates to https://www.3dprintlog.com
+4. On success, navigates to https://www.3dprintlog.com. Offline, it shows the offline
+   screen in `www/index.html` and continues by itself on the plugin's `online` event or on
+   Try again (`test/index_navigation.test.js`). App Review launches in airplane mode, so this
+   must never be a dead end.
 
 **Key Plugins:**
 
