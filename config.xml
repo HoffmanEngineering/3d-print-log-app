@@ -51,6 +51,11 @@
         <!-- The launch storyboard has no image, so without this it is a white (or black)
              screen that then jumps to the blue bootstrap page. -->
         <preference name="SplashScreenBackgroundColor" value="#3F50B5" />
+        <!-- iOS's own user agent, so the UI can tell the shells apart: App Store rules force
+             iOS-only behavior (no Stripe checkout, a different NFC flow) and WKWebView treats
+             file inputs differently. Overrides the global one below for iOS only. Must equal
+             the UI's CORDOVA_IOS_USER_AGENT; scripts/check-user-agent-contract.mjs checks it. -->
+        <preference name="OverrideUserAgent" value="Mozilla/5.0 Google PrintLog-iOS/1.0" />
         <edit-config target="NSCameraUsageDescription" file="*-Info.plist" mode="merge">
             <string>3D Print Log needs camera access to scan QR codes and capture photos of your prints</string>
         </edit-config>
@@ -66,6 +71,8 @@
             <false/>
         </edit-config>
     </platform>
+    <!-- Android's user agent (iOS overrides it in its own block). Must equal the UI's
+         CORDOVA_USER_AGENT; scripts/check-user-agent-contract.mjs checks it. -->
     <preference name="OverrideUserAgent" value="Mozilla/5.0 Google PrintLog/1.2" />
     <!--
         Base URL of the 3D Print Log API, used by cordova-plugin-printlog-native to register
