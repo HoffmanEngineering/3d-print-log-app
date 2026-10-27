@@ -262,7 +262,7 @@ Not yet run on a device; CI compiles it.
   key comes from the API, in the APNs payload.
 - **The FCM token needs the APNs token first**, so `registerForPush` calls
   `registerForRemoteNotifications` and retries `Messaging.token` for up to 10 s.
-- **NFC answers `unsupported`** until Core NFC reading lands (#32).
+- **NFC is session mode** (#32); see "On iOS" under NFC Spool Tags.
 
 ## NFC Spool Tags
 
@@ -330,6 +330,30 @@ material page's tag field and the Materials list's Scan spool sheet. Design:
   lands after Angular boots, so the UI recomputes "can read tags" on that event. Feature
   detection is the presence of `startTagReading`, never the user agent.
 
+### On iOS (#32)
+
+Core NFC, in `src/ios/SpoolTagScanner.swift` with the rules in `SpoolTagRulesIOS.swift`.
+Not yet run on a device; CI compiles it and runs the rules.
+
+- **Session mode, not passive.** Core NFC has no reader mode: every read is a user-started
+  `NFCTagReaderSession` with a system sheet. So the bridge reports `tagReadingMode: 'session'`
+  (Android: `'passive'`), and `startTagReading` only marks a screen as listening. **The sheet
+  opens only from `scanTag()`**, which the page must call from a user tap
+  (HoffmanEngineering/3d-print-log-ui#365); opening it from `startTagReading` would throw it
+  over every screen with a tag picker. Android answers `scanTag` with its status and does
+  nothing else, so the contract (and `UI_THREAD_ACTIONS`) stays the same on both.
+- **No MIFARE Classic.** Core NFC cannot read it, so the reader config (key formats) is
+  ignored and a Classic tag gives at most its UID; Core NFC reports it as family `unknown`,
+  so `classicUnsupported` cannot be set. Type 2 (`READ 0x30`) and ISO 15693
+  (`READ_MULTIPLE_BLOCKS`) memory is read raw within the same 1.5 s budget and caps as
+  Android. DESFire and Plus are ISO-DEP and dropped, as are 4-byte random IDs.
+- **NFC-V UIDs are put in `E0…` order from whichever end holds `0xE0`**, because Apple does
+  not document the byte order of `NFCISO15693Tag.identifier`.
+- **Needs the NFC Tag Reading entitlement and `NFCReaderUsageDescription`** (plugin.xml).
+  The App ID must have the capability too, or signing fails.
+- A read is stored only if no newer session started meanwhile, and every page load ends the
+  session, as on Android.
+
 ## iOS Build Notes
 
 **iOS has not shipped.** The plan and its issues are tracked in
@@ -339,8 +363,8 @@ builds on GitHub's macOS runners, which are free only because this repo is publi
 What exists today is CI's `ios` job: a fresh `cordova platform add ios@8.1.1` and an
 unsigned `cordova build ios --emulator`, after compiling and running the Swift bridge
 router's tests. Signing and TestFlight upload (#28) are not built yet. The native plugin
-has an iOS side for push and taps ("On iOS" under Push Notifications), untested on a
-device; NFC is not built (#32).
+has an iOS side for push, taps and spool tags ("On iOS" under Push Notifications and NFC
+Spool Tags), untested on a device.
 
 - **Plugins come in through Swift Package Manager, not CocoaPods.** cordova-ios 8 links
   any plugin that ships a `Package.swift` (firebasex does) into

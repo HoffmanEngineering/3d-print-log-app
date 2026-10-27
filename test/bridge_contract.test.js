@@ -516,3 +516,7 @@ test('a request whose message cannot be serialized rejects and leaves nothing pe
 test('reports android unless the host says ios', () => {
     assert.equal(installShim().bridge.platform, 'android');
 });
+
+test('reads passively on android, so the page never needs scanTag there', () => {
+    assert.equal(installShim().bridge.tagReadingMode, 'passive');
+});

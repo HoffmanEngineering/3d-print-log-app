@@ -1,8 +1,8 @@
-// Unit tests for PrintLogBridgeRouter.swift, compiled with it by CI's ios job:
+// Unit tests for the Foundation-only Swift files of the iOS plugin, PrintLogBridgeRouter.swift
+// and SpoolTagRulesIOS.swift, compiled with them by CI's ios job:
 //
-//   swiftc -o router-tests \
-//     plugins-local/cordova-plugin-printlog-native/src/ios/PrintLogBridgeRouter.swift \
-//     test/ios/main.swift && ./router-tests
+//   swiftc -o router-tests <src/ios>/PrintLogBridgeRouter.swift \
+//     <src/ios>/SpoolTagRulesIOS.swift test/ios/main.swift && ./router-tests
 //
 // Plain asserts rather than XCTest, so it needs nothing but the compiler, the way the Java
 // helpers are tested with javac. Exits non-zero on the first failure.
@@ -37,6 +37,11 @@ final class FakeActions: PrintLogBridgeActions {
 
     func nfcStatus() -> String { "unsupported" }
     func startTagReading(config: [String: Any]?) -> String { "unsupported" }
+    var scans = 0
+    func scanTag() -> String {
+        scans += 1
+        return "ready"
+    }
     func stopTagReading() { stopped = true }
     func consumeTag() -> [String: Any]? { nil }
     func openNfcSettings() -> Bool { false }
@@ -117,8 +122,53 @@ check(replies.first?["permission"] as? String == "granted", "permission passes t
 check(!replies.contains { $0.keys.contains { $0.lowercased().contains("token") } },
       "no reply carries a token")
 
+// scanTag reaches the action and passes its status back.
+replies = handle(#"{"id":"r10","action":"scanTag"}"#, router)
+check(actions.scans == 1 && replies.first?["nfc"] as? String == "ready", "scanTag runs and answers")
+
+// ---- SpoolTagRulesIOS ----
+
+func bytes(_ hex: String) -> Data {
+    var data = Data()
+    var index = hex.startIndex
+    while index < hex.endIndex {
+        let next = hex.index(index, offsetBy: 2)
+        data.append(UInt8(hex[index..<next], radix: 16)!)
+        index = next
+    }
+    return data
+}
+
+check(SpoolTagRulesIOS.nfcaUid(bytes("04A23F11223344"), family: .ultralight) == "04A23F11223344",
+      "an NTAG UID is uppercase hex")
+check(SpoolTagRulesIOS.nfcaUid(bytes("08A23F11"), family: .unknown) == nil,
+      "a 4-byte UID starting 0x08 is a random ID and is dropped")
+check(SpoolTagRulesIOS.nfcaUid(bytes("08A23F11223344"), family: .unknown) != nil,
+      "only a 4-byte UID can be a random ID")
+check(SpoolTagRulesIOS.nfcaUid(bytes("04A23F11223344"), family: .isoDep) == nil,
+      "DESFire and Plus are ISO-DEP and are dropped, as on Android")
+check(SpoolTagRulesIOS.nfcaUid(Data(), family: .ultralight) == nil, "no UID, no tag")
+
+check(SpoolTagRulesIOS.nfcvUid(bytes("E004015012345678")) == "E004015012345678",
+      "an ISO 15693 UID already in printed order stays")
+check(SpoolTagRulesIOS.nfcvUid(bytes("78563412500104E0")) == "E004015012345678",
+      "an ISO 15693 UID least significant byte first is reversed to the E0 order")
+check(SpoolTagRulesIOS.nfcvUid(Data()) == nil, "no UID, no tag")
+
+let page = Data(repeating: 0xAB, count: 16)
+let type2 = SpoolTagRulesIOS.memory(kind: "type2", data: page)
+check(type2?["kind"] as? String == "type2", "memory carries its kind")
+check(type2?["data"] as? String == page.base64EncodedString(), "memory is base64")
+check(SpoolTagRulesIOS.memory(kind: "type2", data: Data()) == nil, "nothing read, no memory")
+let oversized = SpoolTagRulesIOS.memory(kind: "type2", data: Data(repeating: 1, count: 4000))
+check(Data(base64Encoded: oversized?["data"] as? String ?? "")?.count == 1024,
+      "Type 2 memory is capped at 1024 bytes")
+let nfcv = SpoolTagRulesIOS.memory(kind: "nfcv", data: Data(repeating: 1, count: 4000))
+check(Data(base64Encoded: nfcv?["data"] as? String ?? "")?.count == 2048,
+      "NFC-V memory is capped at 2048 bytes")
+
 if failures > 0 {
     print("\(failures) failure(s)")
     exit(1)
 }
-print("PrintLogBridgeRouter: all checks passed")
+print("iOS plugin helpers: all checks passed")

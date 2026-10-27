@@ -5,8 +5,8 @@ import UserNotifications
 import WebKit
 import cordova_plugin_firebasex_messaging
 
-/// The iOS side of the native bridge: push registration and notification taps for the
-/// remotely loaded app. The page-facing half is `www/printlog-native.js`, shared unchanged
+/// The iOS side of the native bridge: push registration, notification taps and spool tag
+/// reading for the remotely loaded app. The page-facing half is `www/printlog-native.js`, shared unchanged
 /// with Android; this file supplies the `PrintLogNativeHost` object that the shim talks to.
 ///
 /// Why it exists is the same as on Android: once the WebView navigates to
@@ -30,8 +30,14 @@ final class PrintLogNativePlugin: CDVPlugin, PrintLogBridgeActions {
     private var router: PrintLogBridgeRouter!
     private var tapReceiver: PrintLogTapReceiver?
 
-    /// Main thread only.
+    /// Main thread only, like the NFC state below.
     private var pendingTap: [String: String]?
+
+    private let scanner = SpoolTagScanner()
+    private var tagSessionOpen = false
+    /// Bumped by every start and stop, so a read from an earlier session is dropped.
+    private var tagSession = 0
+    private var latestTag: [String: Any]?
 
     /// The last permission read, so the injected host starts from a real value rather than
     /// always "default". Refreshed on every page load and when the app returns to the front.
@@ -120,6 +126,10 @@ final class PrintLogNativePlugin: CDVPlugin, PrintLogBridgeActions {
     }
 
     @objc private func pageDidLoad() {
+        // Any full page load ends a reading session: the page that opened it is gone, so
+        // nothing would claim its tags. Angular route changes never reach here.
+        stopTagReading()
+
         // The user script seeded the permission from the cached value; correct it now that a
         // fresh read is cheap, so Settings never shows "disabled" for a user who granted it.
         refreshPermission { [weak self] permission in
@@ -227,19 +237,67 @@ final class PrintLogNativePlugin: CDVPlugin, PrintLogBridgeActions {
         return tap
     }
 
-    // MARK: - PrintLogBridgeActions: NFC (#32)
+    // MARK: - PrintLogBridgeActions: NFC
     //
-    // Core NFC reading is not built yet. "unsupported" is what the page already shows for a
-    // phone without NFC, so the tag pickers simply do not offer scanning.
+    // The page's session (startTagReading .. stopTagReading) means "a screen is listening",
+    // as on Android, but on iOS it opens nothing: Core NFC has no passive mode, and starting a
+    // reader session puts a system sheet over the page. The sheet opens only from scanTag(),
+    // which the page calls on a user tap. All of these run on the main thread, in the order
+    // the page posted them.
 
-    func nfcStatus() -> String { "unsupported" }
+    func nfcStatus() -> String {
+        SpoolTagScanner.available ? "ready" : "unsupported"
+    }
 
-    func startTagReading(config: [String: Any]?) -> String { "unsupported" }
+    func startTagReading(config: [String: Any]?) -> String {
+        // The config describes MIFARE Classic key formats, which iOS cannot use: Classic is
+        // unreadable here, and Type 2 and ISO 15693 memory is read without keys.
+        tagSessionOpen = true
+        tagSession += 1
+        latestTag = nil
+        return nfcStatus()
+    }
 
-    func stopTagReading() {}
+    func scanTag() -> String {
+        let status = nfcStatus()
+        if status == "ready" && tagSessionOpen {
+            let session = tagSession
+            scanner.onReading = { [weak self] in
+                DispatchQueue.main.async {
+                    guard let self = self, self.tagSession == session else { return }
+                    self.evaluateInPage(
+                        "window.PrintLogNative && window.PrintLogNative.signalTagReading();")
+                }
+            }
+            scanner.onTag = { [weak self] tag in
+                DispatchQueue.main.async {
+                    // A read finishing after the screen closed, or a newer session began,
+                    // belongs to nobody.
+                    guard let self = self, self.tagSession == session else { return }
+                    self.latestTag = tag
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    self.evaluateInPage("window.PrintLogNative && window.PrintLogNative.signalTag();")
+                }
+            }
+            scanner.begin()
+        }
+        return status
+    }
 
-    func consumeTag() -> [String: Any]? { nil }
+    func stopTagReading() {
+        tagSessionOpen = false
+        tagSession += 1
+        latestTag = nil
+        scanner.cancel()
+    }
 
+    func consumeTag() -> [String: Any]? {
+        let tag = latestTag
+        latestTag = nil
+        return tag
+    }
+
+    /// iOS has no NFC switch to send the user to.
     func openNfcSettings() -> Bool { false }
 
     // MARK: - Helpers

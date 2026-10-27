@@ -64,5 +64,22 @@
                 <param name="onload" value="true" />
             </feature>
         </config-file>
+
+        <!-- Spool tag reading (#32). Core NFC refuses a session without both: the usage
+             string shows on the scan sheet, and the entitlement must also be enabled on the
+             App ID (NFC Tag Reading) or signing fails. -->
+        <config-file target="*-Info.plist" parent="NFCReaderUsageDescription">
+            <string>3D Print Log reads the NFC tag on a filament spool to find or link that spool.</string>
+        </config-file>
+        <config-file target="*/Entitlements-Debug.plist" parent="com.apple.developer.nfc.readersession.formats">
+            <array>
+                <string>TAG</string>
+            </array>
+        </config-file>
+        <config-file target="*/Entitlements-Release.plist" parent="com.apple.developer.nfc.readersession.formats">
+            <array>
+                <string>TAG</string>
+            </array>
+        </config-file>
     </platform>
 </plugin>
