@@ -271,8 +271,9 @@ Not yet run on a device; CI compiles it.
   through `window.handleOpenURL`, as the customurlscheme plugin delivers it on Android.
   **Returning YES from that hook is safe only because every answering plugin must allow a
   navigation and `IntentAndNavigationFilter` is `onload`**, so `allow-navigation` still
-  applies. Not ephemeral: Safari's Google session is shared, at the cost of iOS's
-  "wants to use auth0.com" prompt.
+  applies. **Ephemeral** (no cookies shared with Safari): iOS shows no "wants to use
+  auth0.com" prompt before the sheet, and logout leaves no session behind. The cost is a
+  Google or Auth0 sign-in each time, which is rare because the page keeps its own tokens.
 
 ## NFC Spool Tags
 
