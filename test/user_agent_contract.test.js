@@ -107,3 +107,19 @@ test('skips without failing when the UI checkout is absent', () => {
     assert.equal(status, 0, output);
     assert.match(output, /skipped/);
 });
+
+test('ignores a commented-out override inside the iOS block', () => {
+    const config = configXml().replace(
+        '<platform name="ios">',
+        '<platform name="ios">\n        <!-- <preference name="OverrideUserAgent" value="old" /> -->'
+    );
+    const { status, output } = check({ config });
+    assert.equal(status, 0, output);
+});
+
+test('fails on two overrides in the same scope', () => {
+    const extra = `<preference name="OverrideUserAgent" value="${ANDROID}" />`;
+    const { status, output } = check({ config: configXml({ extra }) });
+    assert.equal(status, 1);
+    assert.match(output, /more than one OverrideUserAgent in the same scope/);
+});

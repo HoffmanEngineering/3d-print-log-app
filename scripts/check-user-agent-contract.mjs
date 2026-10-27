@@ -31,34 +31,47 @@ const CONFIG_XML = process.env.PRINT_LOG_CONFIG_XML
   : join(repoRoot, 'config.xml');
 const PLATFORM_TS = join(UI_PATH, 'src', 'app', 'core', 'utils', 'platform.ts');
 
-const PLATFORM_BLOCK = /<platform\s+name=["']([^"']+)["']\s*>([\s\S]*?)<\/platform>/g;
+const PLATFORM_BLOCK = /<platform\s+name=["']([^"']+)["']\s*>[\s\S]*?<\/platform>/g;
+const COMMENT = /<!--[\s\S]*?-->/g;
+const OVERRIDE_USER_AGENT =
+  /<preference\s+name=["']OverrideUserAgent["']\s+value=["']([^"']+)["']/g;
 
 function fail(message) {
   console.error(`✖ user agent contract: ${message}`);
   process.exit(1);
 }
 
-function overrideUserAgentIn(xml) {
-  const matches = [
-    ...xml.matchAll(
-      /<preference\s+name=["']OverrideUserAgent["']\s+value=["']([^"']+)["']/g
-    ),
-  ];
-  if (matches.length > 1) {
-    fail(`more than one OverrideUserAgent in the same scope of ${CONFIG_XML}`);
-  }
-  return matches[0]?.[1];
+function spans(regex, text) {
+  return [...text.matchAll(regex)].map((m) => ({
+    name: m[1],
+    start: m.index,
+    end: m.index + m[0].length,
+  }));
 }
 
 function appUserAgents() {
-  // XML comments can quote a preference; drop them before matching.
-  const xml = readFileSync(CONFIG_XML, 'utf8').replace(/<!--[\s\S]*?-->/g, '');
-  const global = overrideUserAgentIn(xml.replace(PLATFORM_BLOCK, ''));
-  const blocks = Object.fromEntries(
-    [...xml.matchAll(PLATFORM_BLOCK)].map(([, name, body]) => [name, body])
-  );
-  const android = overrideUserAgentIn(blocks.android ?? '') ?? global;
-  const ios = overrideUserAgentIn(blocks.ios ?? '') ?? global;
+  // Each preference is placed by where it sits in the file rather than by cutting the text
+  // up: a comment can quote a preference, so one inside a comment is skipped, and one
+  // inside a <platform> block belongs to that platform. Nothing is stripped from the text.
+  const xml = readFileSync(CONFIG_XML, 'utf8');
+  const comments = spans(COMMENT, xml);
+  const inComment = (i) => comments.some((c) => i >= c.start && i < c.end);
+  const blocks = spans(PLATFORM_BLOCK, xml).filter((b) => !inComment(b.start));
+
+  const scopes = {};
+  for (const { name: value, start } of spans(OVERRIDE_USER_AGENT, xml)) {
+    if (inComment(start)) {
+      continue;
+    }
+    const scope = blocks.find((b) => start >= b.start && start < b.end)?.name ?? 'global';
+    if (scope in scopes) {
+      fail(`more than one OverrideUserAgent in the same scope of ${CONFIG_XML}`);
+    }
+    scopes[scope] = value;
+  }
+
+  const android = scopes.android ?? scopes.global;
+  const ios = scopes.ios ?? scopes.global;
   if (!android || !ios) {
     fail(`no OverrideUserAgent for ${android ? 'iOS' : 'Android'} in ${CONFIG_XML}`);
   }
