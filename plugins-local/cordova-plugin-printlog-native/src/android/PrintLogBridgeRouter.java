@@ -77,7 +77,7 @@ public class PrintLogBridgeRouter {
      */
     private static final Set<String> UI_THREAD_ACTIONS = Collections.unmodifiableSet(
             new HashSet<>(Arrays.asList(
-                    "nfcStatus", "startTagReading", "stopTagReading", "consumeTag",
+                    "nfcStatus", "startTagReading", "scanTag", "stopTagReading", "consumeTag",
                     "openNfcSettings")));
 
     /** @return true if the request names an action that must run on the UI thread. */
@@ -130,6 +130,11 @@ public class PrintLogBridgeRouter {
             } else if ("startTagReading".equals(action)) {
                 reply.put("ok", true);
                 reply.put("nfc", actions.startTagReading(request.optJSONObject("config")));
+            } else if ("scanTag".equals(action)) {
+                // iOS shows its scan sheet here. Android reads passively while a session is
+                // open, so there is nothing to start: answer the status, as iOS does.
+                reply.put("ok", true);
+                reply.put("nfc", actions.nfcStatus());
             } else if ("stopTagReading".equals(action)) {
                 actions.stopTagReading();
                 reply.put("ok", true);

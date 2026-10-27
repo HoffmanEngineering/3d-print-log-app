@@ -234,6 +234,9 @@
   var bridge = {
     // The iOS host names itself; Android's WebMessageListener host carries no properties.
     platform: host.platform === 'ios' ? 'ios' : 'android',
+    // 'passive': tags arrive whenever a screen is listening (Android reader mode). 'session':
+    // every read is user-started with scanTag(), which shows the system sheet (iOS Core NFC).
+    tagReadingMode: host.platform === 'ios' ? 'session' : 'passive',
     appVersion: host.appVersion || '',
     pushPermission: host.pushPermission || 'default',
 
@@ -307,6 +310,14 @@
     startTagReading: function (config) {
       return request('startTagReading', validConfig(config) ? { config: config } : null)
         .then(nfcStatusOf);
+    },
+
+    /**
+     * Session mode only: shows the system scan sheet for one read while a reading session is
+     * open. Call it from a user tap. The tag still arrives through onTag/consumeTag.
+     */
+    scanTag: function () {
+      return request('scanTag').then(nfcStatusOf);
     },
 
     stopTagReading: function () {

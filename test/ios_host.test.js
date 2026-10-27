@@ -114,3 +114,13 @@ test('the host and the Swift plugin agree on the origin and the handler name', (
     assert.ok(hostSource.includes(`location.host !== '${host}'`));
     assert.ok(hostSource.includes(`handlers.${handler}`));
 });
+
+test('reads in session mode on iOS, and scanTag crosses to native', async () => {
+    const { window, posted } = boot();
+    assert.equal(window.PrintLogNative.tagReadingMode, 'session');
+
+    const status = window.PrintLogNative.scanTag();
+    assert.equal(posted[0].action, 'scanTag');
+    window.PrintLogNativeHost.__deliver(JSON.stringify({ id: posted[0].id, ok: true, nfc: 'ready' }));
+    assert.equal(await status, 'ready');
+});

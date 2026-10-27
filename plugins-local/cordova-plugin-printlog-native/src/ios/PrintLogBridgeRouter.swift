@@ -20,8 +20,14 @@ protocol PrintLogBridgeActions: AnyObject {
     /// `unsupported`, `off` or `ready`.
     func nfcStatus() -> String
 
-    /// Starts a tag-reading session and returns the NFC status. `config` is untrusted.
+    /// Starts a tag-reading session and returns the NFC status. `config` is untrusted. On iOS
+    /// this opens no sheet: reading is user-started, through scanTag().
     func startTagReading(config: [String: Any]?) -> String
+
+    /// iOS only: shows the system scan sheet for one read, if a session is open, and returns
+    /// the NFC status. Android has no such action; the page calls it only when
+    /// `tagReadingMode` is "session".
+    func scanTag() -> String
 
     func stopTagReading()
 
@@ -89,6 +95,8 @@ final class PrintLogBridgeRouter {
         case "startTagReading":
             let config = request["config"] as? [String: Any]
             send(["ok": true, "nfc": actions.startTagReading(config: config)])
+        case "scanTag":
+            send(["ok": true, "nfc": actions.scanTag()])
         case "stopTagReading":
             actions.stopTagReading()
             send(["ok": true])
