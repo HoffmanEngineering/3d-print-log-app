@@ -1,8 +1,8 @@
-// Unit tests for the Foundation-only Swift files of the iOS plugin, PrintLogBridgeRouter.swift
-// and SpoolTagRulesIOS.swift, compiled with them by CI's ios job:
+// Unit tests for the Foundation-only Swift files of the iOS plugin (PrintLogBridgeRouter,
+// SpoolTagRulesIOS, PrintLogAuthRules), compiled with them by CI's ios job:
 //
-//   swiftc -o router-tests <src/ios>/PrintLogBridgeRouter.swift \
-//     <src/ios>/SpoolTagRulesIOS.swift test/ios/main.swift && ./router-tests
+//   swiftc -o router-tests <src/ios>/PrintLogBridgeRouter.swift <src/ios>/SpoolTagRulesIOS.swift \
+//     <src/ios>/PrintLogAuthRules.swift test/ios/main.swift && ./router-tests
 //
 // Plain asserts rather than XCTest, so it needs nothing but the compiler, the way the Java
 // helpers are tested with javac. Exits non-zero on the first failure.
@@ -166,6 +166,33 @@ check(Data(base64Encoded: oversized?["data"] as? String ?? "")?.count == 1024,
 let nfcv = SpoolTagRulesIOS.memory(kind: "nfcv", data: Data(repeating: 1, count: 4000))
 check(Data(base64Encoded: nfcv?["data"] as? String ?? "")?.count == 2048,
       "NFC-V memory is capped at 2048 bytes")
+
+// ---- PrintLogAuthRules ----
+
+func url(_ string: String) -> URL { URL(string: string)! }
+
+check(PrintLogAuthRules.isAuthorize(url("https://dev-3dprintlog.auth0.com/authorize?client_id=x")),
+      "a tenant's /authorize is the login page")
+check(PrintLogAuthRules.isAuthorize(url("https://login.eu.auth0.com/authorize")),
+      "a regional tenant counts too")
+check(!PrintLogAuthRules.isAuthorize(url("https://dev-3dprintlog.auth0.com/v2/logout")),
+      "logout loads in the WebView as before")
+check(!PrintLogAuthRules.isAuthorize(url("https://dev-3dprintlog.auth0.com/u/login")),
+      "Auth0's own login pages, once in the sheet, are not intercepted again")
+check(!PrintLogAuthRules.isAuthorize(url("http://dev-3dprintlog.auth0.com/authorize")),
+      "plain http is not the login page")
+check(!PrintLogAuthRules.isAuthorize(url("https://evilauth0.com/authorize")),
+      "a host merely ending in auth0.com is not Auth0")
+check(!PrintLogAuthRules.isAuthorize(url("https://www.3dprintlog.com/authorize")),
+      "the app's own origin is not Auth0")
+
+check(PrintLogAuthRules.isCallback(url(
+    "com.hoffmanengineering.printlog://cordova/com.hoffmanengineering.printlog/callback?code=a&state=b")),
+      "the UI's Cordova callback URI is accepted")
+check(!PrintLogAuthRules.isCallback(url("com.hoffmanengineering.printlog://cordova/other")),
+      "a URL without /callback? is not a login callback")
+check(!PrintLogAuthRules.isCallback(url("https://www.3dprintlog.com/callback?code=a")),
+      "the web callback is not the app's")
 
 if failures > 0 {
     print("\(failures) failure(s)")
