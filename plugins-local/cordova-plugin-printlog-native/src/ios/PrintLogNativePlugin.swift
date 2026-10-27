@@ -133,9 +133,10 @@ final class PrintLogNativePlugin: CDVPlugin, PrintLogBridgeActions {
             }
         }
         session.presentationContextProvider = self
-        // Shares Safari's cookies, so a user already signed in to Google there gets one tap.
-        // The cost is iOS's "wants to use auth0.com to sign in" prompt before the sheet.
-        session.prefersEphemeralWebBrowserSession = false
+        // Ephemeral: no cookies shared with Safari, so iOS shows no "wants to use auth0.com to
+        // sign in" prompt before the sheet, and logging out leaves no session behind. The cost,
+        // signing in to Google again, is rare: the page keeps its own Auth0 tokens.
+        session.prefersEphemeralWebBrowserSession = true
         authSession = session
         if !session.start() {
             authSession = nil
