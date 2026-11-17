@@ -195,7 +195,11 @@ tag be pushed.
 - `google-services.json` is **required for the Android build** — without it Gradle fails at
   `:app:processDebugGoogleServices`. It is gitignored and injected in CI from the
   `GOOGLE_SERVICES_JSON_BASE64` secret (repository secret for `ci.yml`, `production`
-  environment for `release.yml`), exactly the way `build.json` is. For a local build, put
+  environment for `release.yml`), exactly the way `build.json` is. Dependabot and fork PRs
+  get no Actions secrets, so on a `pull_request` run with the secret empty `ci.yml` copies
+  `.github/ci/google-services.placeholder.json` instead (dummy project, real package name):
+  the APK compiles but cannot receive push. A push to `main` still fails without the real
+  file, and `release.yml` never uses the placeholder. For a local build, put
   the real file from the Firebase console at the project root. Full setup, both the client
   file and the API's service account key: `docs/firebase-setup.md`.
 - `PrintLogApiUrl` in `config.xml` is the API base URL the native bridge posts device
